@@ -22,16 +22,15 @@ import { AddEventListenerOptions, EventHandler, RemoveEventListenerOptions } fro
 export type Long = number | bigint;
 
 /**
- * Constructor parameters for the S3 Transfer Manager
+ * Constructor parameters for the S3 Transfer Manager configuration.
  *
- * @param s3ClientInstance - the low level S3 client that will be used to send requests to S3.
- * @param targetPartSizeBytes - the target part size to use in a multipart transfer. Does not apply to downloads if multipartDownloadType is PART
- * @param multipartUploadThresholdBytes - the size threshold, in bytes, for when to use multipart upload.
- * @param checksumValidationEnabled - option to disable checksum validation for download.
- * @param checksumAlgorithm - checksum algorithm to use for upload
- * @param multipartDownloadType - how the SDK should perform multipart download, either RANGE or PART
- * @param progressListener - An array of progress listeners that will be notified of transfer events including initialization, bytes transferred, completion, and failure.
- *
+ * @param s3ClientInstance - The low level S3 client that will be used to send requests to S3.
+ * @param targetPartSizeBytes - The target part size to use in a multipart transfer. Does not apply to downloads if multipartDownloadType is PART.
+ * @param multipartUploadThresholdBytes - The size threshold, in bytes, for when to use multipart upload.
+ * @param checksumValidationEnabled - Option to disable checksum validation for download.
+ * @param checksumAlgorithm - Checksum algorithm to use for upload.
+ * @param multipartDownloadType - How the SDK should perform multipart download, either RANGE or PART.
+ * @param eventListeners - Collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses of all transfers from the client.
  *
  * @public
  */
@@ -46,7 +45,7 @@ export interface S3TransferManagerConfig {
 }
 
 /**
- * Uses intersection because requests must include all the required parameters from
+ * Uses intersection because requests includes all the required parameters from
  * both PutObjectCommandInput and CreateMultipartUploadCommandInput to support both single object
  * and multipart upload requests.
  *
@@ -63,36 +62,28 @@ export type UploadRequest = PutObjectCommandInput & CreateMultipartUploadCommand
 export type UploadResponse = PutObjectCommandOutput | CompleteMultipartUploadCommandOutput;
 
 /**
- * Features the same properties as SDK JS S3 Command GetObjectCommandInput
+ * Features the same properties as SDK JS S3 Command GetObjectCommandInput.
+ * Created to standardize naming convention for TM APIs.
  *
  * @public
  */
 export type DownloadRequest = GetObjectCommandInput;
 
 /**
- * Features the same properties as SDK JS S3 Command GetObjectCommandOutput
+ * Features the same properties as SDK JS S3 Command GetObjectCommandOutput.
+ * Created to standardize naming convention for TM APIs.
  *
  * @public
  */
 export type DownloadResponse = GetObjectCommandOutput;
 
 /**
- * Represents a cancellable operation with progress tracking.
- * Provides access to the operation's promise, abort controller, and cancellation status.
- *
- * @public
- */
-export interface TransferOperation<status> {
-  done: Promise<status>;
-  abortController: AbortController;
-  isCancelled: boolean;
-}
-
-/**
  * Client for efficient transfer of objects to and from Amazon S3.
  * Provides methods to optimize uploading and downloading individual objects
  * as well as entire directories, with support for multipart operations,
  * concurrency control, and request cancellation.
+ * Implements an event-based progress tracking system with methods to register,
+ * dispatch, and remove listeners for transfer lifecycle events.
  *
  * @public
  */
@@ -100,20 +91,40 @@ export interface S3TransferManager {
   // eslint-disable-next-line @typescript-eslint/no-misused-new
   new (config?: S3TransferManagerConfig): S3TransferManager;
 
+  /**
+   * Lets users upload single objects from a given directory to a given bucket.
+   * Supports multipart upload, single object upload, and transfer progress listeners.
+   *
+   * @param request - All properties of a single or multipart upload request.
+   * @param options - Allows users to specify cancel functions for the request.
+   * @param eventListeners - Collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses per request.
+   *
+   * @returns The response from the S3 API for the upload request.
+   */
   upload(
     request: UploadRequest,
     options?: HttpHandlerOptions,
     eventListeners?: TransferEventListeners
-  ): TransferOperation<UploadResponse>;
+  ): Promise<UploadResponse>;
 
+  /**
+   * Lets users download single objects from a given bucket to a given directory.
+   * Supports multipart download, single object download, and transfer progress listeners.
+   *
+   * @param request - All properties of a single or multipart upload request.
+   * @param options - Allows users to specify cancel functions for the request.
+   * @param eventListeners - Collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses per request.
+   *
+   * @returns The response from the S3 API for the download request.
+   */
   download(
     request: DownloadRequest,
     options?: HttpHandlerOptions,
     eventListeners?: TransferEventListeners
-  ): TransferOperation<DownloadResponse>;
+  ): Promise<DownloadResponse>;
 
   /**
-   * Represents an API to upload all files under the given directory to the provided S3 bucket
+   * Represents an API to upload all files under the given directory to the provided S3 bucket.
    *
    * @param options.bucket - The name of the bucket to upload objects to.
    * @param options.source - The source directory to upload.
@@ -123,7 +134,7 @@ export interface S3TransferManager {
    * @param options.s3Delimiter - Default "/". The S3 delimiter. A delimiter causes a list operation to roll up all the keys that share a common prefix into a single summary list result.
    * @param options.putObjectRequestCallback - A callback mechanism to allow customers to update individual putObjectRequest that the S3 Transfer Manager generates.
    * @param options.failurePolicy - The failure policy to handle failed requests
-   * @param options.progressListener - An array of progress listeners that will be notified of transfer events including initialization, bytes transferred, completion, and failure.
+   * @param eventListeners - Collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses of directory uploads.
    *
    * @returns The number of objects that have been uploaded and the number of objects that have failed
    */
@@ -139,7 +150,6 @@ export interface S3TransferManager {
     failurePolicy?: (error?: unknown) => Promise<void>;
     eventListeners?: TransferEventListeners;
   }): Promise<{
-    // defined as long, but should not exceed Max Safe Integer in practical usage.
     objectsUploaded: Long;
     objectsFailed: Long;
   }>;
@@ -155,7 +165,7 @@ export interface S3TransferManager {
    * @param options.filter - A callback to allow users to filter out unwanted S3 object. It is invoked for each S3 object. An example implementation is a predicate that takes an S3Object and returns a boolean indicating whether this S3Object should be downloaded
    * @param options.getObjectRequestCallback - A callback mechanism to allow customers to update individual getObjectRequest that the S3 Transfer Manager generates.
    * @param options.failurePolicy - The failure policy to handle failed requests
-   * @param options.progressListener - An array of progress listeners that will be notified of transfer events including initialization, bytes transferred, completion, and failure.
+   * @param eventListeners - Collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses of directory downloads.
    *
    * @returns The number of objects that have been uploaded and the number of objects that have failed
    */
@@ -174,6 +184,16 @@ export interface S3TransferManager {
     objectsFailed: Long;
   }>;
 
+  /**
+   * Registers a callback function to be executed when a specific transfer event occurs.
+   * Supports monitoring the full lifecycle of transfers.
+   *
+   * @param type - The type of event to listen for.
+   * @param callback - Function to execute when the specified event occurs.
+   * @param options - Optional configuration for the event listener.
+   *
+   * @public
+   */
   addEventListener(
     type: "transferInitiated",
     callback: EventHandler<TransferEvent>,
@@ -196,10 +216,29 @@ export interface S3TransferManager {
   ): void;
   addEventListener(type: string, callback: EventHandler | null, options?: AddEventListenerOptions | boolean): void;
 
+  /**
+   * Dispatches an event to the registered event listeners.
+   * Triggers callbacks registered via addEventListener with matching event types.
+   *
+   * @param event - The event object to dispatch.
+   * @returns True if event was successfuly dispatched, false otherwise.
+   *
+   * @public
+   */
   dispatchEvent(event: Event & TransferEvent): boolean;
   dispatchEvent(event: Event & TransferCompleteEvent): boolean;
   dispatchEvent(event: Event): boolean;
 
+  /**
+   * Removes a previously registered event listener from the specified event type.
+   * Stops the callback from being invoked when the event occurs.
+   *
+   * @param type - The type of event to stop listening for.
+   * @param callback - The function that was previously registered.
+   * @param options - Optional configuration for the event listener.
+   *
+   * @public
+   */
   removeEventListener(
     type: "transferInitiated",
     callback: EventHandler<TransferEvent>,
@@ -228,7 +267,7 @@ export interface S3TransferManager {
 }
 
 /**
- * Provides a snapshot of the progress during a single object transfer
+ * Provides a snapshot of the progress during a single object transfer.
  *
  * @public
  */
@@ -239,7 +278,7 @@ export interface SingleObjectProgressSnapshot {
 }
 
 /**
- * Provides a snapshot of the progress during a directory transfer
+ * Provides a snapshot of the progress during a directory transfer.
  *
  * @public
  */
@@ -258,8 +297,10 @@ export interface DirectoryProgressSnapshot {
 export type TransferProgressSnapshot = SingleObjectProgressSnapshot | DirectoryProgressSnapshot;
 
 /**
- * Custom event interface
+ * Event interface for transfer progress events.
+ * Used for tracking ongoing transfers with the original request and progress snapshot.
  *
+ * @public
  */
 export interface TransferEvent {
   request: UploadRequest | DownloadRequest;
@@ -267,18 +308,18 @@ export interface TransferEvent {
 }
 
 /**
- * Custom event interface for completion
+ * Event interface for transfer completion.
+ * Extends TransferEvent with response data that is received after a completed transfer.
  *
+ * @public
  */
-export interface TransferCompleteEvent {
-  request: UploadRequest | DownloadRequest;
+export interface TransferCompleteEvent extends TransferEvent {
   response: UploadResponse | DownloadResponse;
-  snapshot: TransferProgressSnapshot;
 }
 
 /**
- * Interface for tracking transfer progress through event-driven callbacks.
- * Allows monitoring for initialization, bytes transferred, completion, and failure during transfers.
+ * Collection of event handlers to monitor transfer lifecycle events.
+ * Allows a way to register callbacks for each stage of the transfer process.
  *
  * @public
  */
