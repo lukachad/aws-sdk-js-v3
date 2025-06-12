@@ -134,12 +134,12 @@ export interface S3TransferManager {
    * @param options.source - The source directory to upload.
    * @param options.followSymbolicLinks - Whether to follow symbolic links when traversing the file tree.
    * @param options.recursive - Whether to upload directories recursively.
-   * @param options.s3Prefix - The S3 key prefix to use for each object. If not provided, files will be uploaded to the root of the bucket todo()
-   * @param options.filter - A callback to allow users to filter out unwanted S3 object. It is invoked for each S3 object. An example implementation is a predicate that takes an S3Object and returns a boolean indicating whether this S3Object should be uploaded
+   * @param options.s3Prefix - The S3 key prefix to use for each object. If not provided, files will be uploaded to the root of the bucket todo().
+   * @param options.filter - A callback to allow users to filter out unwanted S3 object. It is invoked for each S3 object. An example implementation is a predicate that takes an S3Object and returns a boolean indicating whether this S3Object should be uploaded.
    * @param options.s3Delimiter - Default "/". The S3 delimiter. A delimiter causes a list operation to roll up all the keys that share a common prefix into a single summary list result.
    * @param options.putObjectRequestCallback - A callback mechanism to allow customers to update individual putObjectRequest that the S3 Transfer Manager generates.
-   * @param options.failurePolicy - The failure policy to handle failed requests
-   * @param options.transferOptions - Allows users to specify cancel functions for the request and a collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses per request.
+   * @param options.failurePolicy - The failure policy to handle failed requests.
+   * @param options.transferOptions - Allows supplying an AbortSignal and/or transfer event listeners.
    *
    * @returns the number of objects that have been uploaded and the number of objects that have failed
    */
@@ -162,15 +162,15 @@ export interface S3TransferManager {
   /**
    * Represents an API to download all objects under a bucket to the provided local directory.
    *
-   * @param options.bucket - The name of the bucket
-   * @param options.destination - The destination directory
-   * @param options.s3Prefix - Specify the S3 prefix that limits the response to keys that begin with the specified prefix
+   * @param options.bucket - The name of the bucket.
+   * @param options.destination - The destination directory.
+   * @param options.s3Prefix - Specify the S3 prefix that limits the response to keys that begin with the specified prefix.
    * @param options.s3Delimiter - Specify the S3 delimiter.
    * @param options.recursive - Whether to upload directories recursively.
-   * @param options.filter - A callback to allow users to filter out unwanted S3 object. It is invoked for each S3 object. An example implementation is a predicate that takes an S3Object and returns a boolean indicating whether this S3Object should be downloaded
+   * @param options.filter - A callback to allow users to filter out unwanted S3 object. It is invoked for each S3 object. An example implementation is a predicate that takes an S3Object and returns a boolean indicating whether this S3Object should be downloaded.
    * @param options.getObjectRequestCallback - A callback mechanism to allow customers to update individual getObjectRequest that the S3 Transfer Manager generates.
-   * @param options.failurePolicy - The failure policy to handle failed requests
-   * @param options.transferOptions - Allows users to specify cancel functions for the request and a collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses per request.
+   * @param options.failurePolicy - The failure policy to handle failed requests.
+   * @param options.transferOptions - Allows supplying an AbortSignal and/or transfer event listeners.
    *
    * @returns The number of objects that have been uploaded and the number of objects that have failed
    */
@@ -181,7 +181,7 @@ export interface S3TransferManager {
     s3Delimiter?: string;
     recursive?: boolean;
     filter?: (object?: S3Object) => boolean;
-    getObjectRequestCallback?: (getObjectRequest: GetObjectCommandOutput) => Promise<void>;
+    getObjectRequestCallback?: (getObjectRequest: GetObjectCommandInput) => Promise<void>;
     failurePolicy?: (error?: unknown) => Promise<void>;
     transferOptions?: TransferOptions;
   }): Promise<{
