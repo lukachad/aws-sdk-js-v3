@@ -14,33 +14,38 @@ import { HttpHandlerOptions } from "@smithy/types";
 import { AddEventListenerOptions, EventHandler, RemoveEventListenerOptions } from "./event-handler-types";
 
 /**
- * Represents a numeric value that can be either number or bigint.
- * Use number for values within safe integer range, bigint for larger values.
- *
- * @public
- */
-export type Long = number | bigint;
-
-/**
  * Constructor parameters for the S3 Transfer Manager configuration.
- *
- * @param s3ClientInstance - The low level S3 client that will be used to send requests to S3.
- * @param targetPartSizeBytes - The target part size to use in a multipart transfer. Does not apply to downloads if multipartDownloadType is PART.
- * @param multipartUploadThresholdBytes - The size threshold, in bytes, for when to use multipart upload.
- * @param checksumValidationEnabled - Option to disable checksum validation for download.
- * @param checksumAlgorithm - Checksum algorithm to use for upload.
- * @param multipartDownloadType - How the SDK should perform multipart download, either RANGE or PART.
- * @param eventListeners - Collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses of all transfers from the client.
  *
  * @public
  */
 export interface S3TransferManagerConfig {
+  /**
+   * The low level S3 client that will be used to send requests to S3.
+   */
   s3ClientInstance?: S3Client;
-  targetPartSizeBytes?: Long;
-  multipartUploadThresholdBytes?: Long;
+  /**
+   * The target part size to use in a multipart transfer. Does not apply to downloads if multipartDownloadType is PART.
+   */
+  targetPartSizeBytes?: number;
+  /**
+   * The size threshold, in bytes, for when to use multipart upload.
+   */
+  multipartUploadThresholdBytes?: number;
+  /**
+   * Option for whether to use checksum validation for download.
+   */
   checksumValidationEnabled?: boolean;
+  /**
+   * Checksum algorithm to use for upload.
+   */
   checksumAlgorithm?: ChecksumAlgorithm;
+  /**
+   * How the SDK should perform multipart download, either RANGE or PART.
+   */
   multipartDownloadType?: "RANGE" | "PART";
+  /**
+   * Collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses of all transfers from the client.
+   */
   eventListeners?: TransferEventListeners;
 }
 
@@ -78,6 +83,15 @@ export type DownloadRequest = GetObjectCommandInput;
 export type DownloadResponse = GetObjectCommandOutput;
 
 /**
+ * Options for transfer operations that combine HTTP handler options with transfer event listeners.
+ *
+ * @property eventListeners - Collection of callbacks for monitoring transfer lifecycle events
+ *
+ * @public
+ */
+export type TransferOptions = HttpHandlerOptions & { eventListeners?: TransferEventListeners };
+
+/**
  * Client for efficient transfer of objects to and from Amazon S3.
  * Provides methods to optimize uploading and downloading individual objects
  * as well as entire directories, with support for multipart operations,
@@ -96,32 +110,22 @@ export interface S3TransferManager {
    * Supports multipart upload, single object upload, and transfer progress listeners.
    *
    * @param request - All properties of a single or multipart upload request.
-   * @param options - Allows users to specify cancel functions for the request.
-   * @param eventListeners - Collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses per request.
+   * @param transferOptions - Allows users to specify cancel functions for the request and a collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses per request.
    *
    * @returns The response from the S3 API for the upload request.
    */
-  upload(
-    request: UploadRequest,
-    options?: HttpHandlerOptions,
-    eventListeners?: TransferEventListeners
-  ): Promise<UploadResponse>;
+  upload(request: UploadRequest, transferOptions?: TransferOptions): Promise<UploadResponse>;
 
   /**
    * Lets users download single objects from a given bucket to a given directory.
    * Supports multipart download, single object download, and transfer progress listeners.
    *
    * @param request - All properties of a single or multipart upload request.
-   * @param options - Allows users to specify cancel functions for the request.
-   * @param eventListeners - Collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses per request.
+   * @param transferOptions - Allows users to specify cancel functions for the request and a collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses per request.
    *
-   * @returns The response from the S3 API for the download request.
+   * @returns the response from the S3 API for the download request.
    */
-  download(
-    request: DownloadRequest,
-    options?: HttpHandlerOptions,
-    eventListeners?: TransferEventListeners
-  ): Promise<DownloadResponse>;
+  download(request: DownloadRequest, transferOptions?: TransferOptions): Promise<DownloadResponse>;
 
   /**
    * Represents an API to upload all files under the given directory to the provided S3 bucket.
@@ -131,12 +135,13 @@ export interface S3TransferManager {
    * @param options.followSymbolicLinks - Whether to follow symbolic links when traversing the file tree.
    * @param options.recursive - Whether to upload directories recursively.
    * @param options.s3Prefix - The S3 key prefix to use for each object. If not provided, files will be uploaded to the root of the bucket todo()
+   * @param options.filter - A callback to allow users to filter out unwanted S3 object. It is invoked for each S3 object. An example implementation is a predicate that takes an S3Object and returns a boolean indicating whether this S3Object should be uploaded
    * @param options.s3Delimiter - Default "/". The S3 delimiter. A delimiter causes a list operation to roll up all the keys that share a common prefix into a single summary list result.
    * @param options.putObjectRequestCallback - A callback mechanism to allow customers to update individual putObjectRequest that the S3 Transfer Manager generates.
    * @param options.failurePolicy - The failure policy to handle failed requests
-   * @param eventListeners - Collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses of directory uploads.
+   * @param options.transferOptions - Allows users to specify cancel functions for the request and a collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses per request.
    *
-   * @returns The number of objects that have been uploaded and the number of objects that have failed
+   * @returns the number of objects that have been uploaded and the number of objects that have failed
    */
   uploadAll(options: {
     bucket: string;
@@ -148,10 +153,10 @@ export interface S3TransferManager {
     s3Delimiter?: string;
     putObjectRequestCallback?: (putObjectRequest: PutObjectCommandInput) => Promise<void>;
     failurePolicy?: (error?: unknown) => Promise<void>;
-    eventListeners?: TransferEventListeners;
+    transferOptions?: TransferOptions;
   }): Promise<{
-    objectsUploaded: Long;
-    objectsFailed: Long;
+    objectsUploaded: number;
+    objectsFailed: number;
   }>;
 
   /**
@@ -165,7 +170,7 @@ export interface S3TransferManager {
    * @param options.filter - A callback to allow users to filter out unwanted S3 object. It is invoked for each S3 object. An example implementation is a predicate that takes an S3Object and returns a boolean indicating whether this S3Object should be downloaded
    * @param options.getObjectRequestCallback - A callback mechanism to allow customers to update individual getObjectRequest that the S3 Transfer Manager generates.
    * @param options.failurePolicy - The failure policy to handle failed requests
-   * @param eventListeners - Collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses of directory downloads.
+   * @param options.transferOptions - Allows users to specify cancel functions for the request and a collection of callbacks for monitoring transfer lifecycle events. Allows tracking statuses per request.
    *
    * @returns The number of objects that have been uploaded and the number of objects that have failed
    */
@@ -176,12 +181,12 @@ export interface S3TransferManager {
     s3Delimiter?: string;
     recursive?: boolean;
     filter?: (object?: S3Object) => boolean;
-    getObjectRequestCallback?: any;
-    failurePolicy?: any;
-    eventListeners?: TransferEventListeners;
+    getObjectRequestCallback?: (getObjectRequest: GetObjectCommandOutput) => Promise<void>;
+    failurePolicy?: (error?: unknown) => Promise<void>;
+    transferOptions?: TransferOptions;
   }): Promise<{
-    objectsDownloaded: Long;
-    objectsFailed: Long;
+    objectsDownloaded: number;
+    objectsFailed: number;
   }>;
 
   /**
@@ -190,7 +195,7 @@ export interface S3TransferManager {
    *
    * @param type - The type of event to listen for.
    * @param callback - Function to execute when the specified event occurs.
-   * @param options - Optional configuration for the event listener.
+   * @param options - Optional configuration for event listener behavior.
    *
    * @public
    */
@@ -221,7 +226,7 @@ export interface S3TransferManager {
    * Triggers callbacks registered via addEventListener with matching event types.
    *
    * @param event - The event object to dispatch.
-   * @returns True if event was successfuly dispatched, false otherwise.
+   * @returns whether the event dispatched successfully
    *
    * @public
    */
@@ -272,8 +277,8 @@ export interface S3TransferManager {
  * @public
  */
 export interface SingleObjectProgressSnapshot {
-  transferredBytes: Long;
-  totalBytes?: Long;
+  transferredBytes: number;
+  totalBytes?: number;
   response?: UploadResponse | DownloadResponse;
 }
 
@@ -283,10 +288,10 @@ export interface SingleObjectProgressSnapshot {
  * @public
  */
 export interface DirectoryProgressSnapshot {
-  transferredBytes: Long;
-  totalBytes?: Long;
-  transferredFiles: Long;
-  totalFiles?: Long;
+  transferredBytes: number;
+  totalBytes?: number;
+  transferredFiles: number;
+  totalFiles?: number;
 }
 
 /**

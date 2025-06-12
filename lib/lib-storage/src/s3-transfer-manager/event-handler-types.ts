@@ -33,10 +33,18 @@ export type EventHandlerObject<E = Event> = {
  * @public
  */
 export type AddEventListenerOptions = {
+  /**
+   * A boolean value indicating that the listener should be invoked at most once
+   * after being added. If true, the listener would be automatically removed when invoked.
+   * If not specified, defaults to false.
+   */
   once?: boolean;
-  passive?: boolean;
+  /**
+   * An AbortSignal. The listener will be removed when the abort() method of the
+   * AbortController which owns the AbortSignal is called. If not specified, no
+   * AbortSignal is associated with the listener.
+   */
   signal?: AbortSignal;
-  capture?: boolean;
 };
 
 /**
