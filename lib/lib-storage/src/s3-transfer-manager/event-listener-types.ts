@@ -6,7 +6,7 @@
 
  * @public
  */
-export type EventHandlerFunction<E = Event> = (event: Event & E) => void;
+export type EventListenerFunction<E = Event> = (event: Event & E) => void;
 
 /**
  * Union type for handling transfer events in the transfer manager.
@@ -14,7 +14,7 @@ export type EventHandlerFunction<E = Event> = (event: Event & E) => void;
  *
  * @public
  */
-export type EventHandler<E = Event> = EventHandlerFunction<E> | EventHandlerObject<E>;
+export type EventListener<E = Event> = EventListenerFunction<E> | EventListenerObject<E>;
 
 /**
  * Object type for handling transfer events in the transfer manager.
@@ -22,8 +22,8 @@ export type EventHandler<E = Event> = EventHandlerFunction<E> | EventHandlerObje
  *
  * @public
  */
-export type EventHandlerObject<E = Event> = {
-  handleEvent: EventHandlerFunction<E>;
+export type EventListenerObject<E = Event> = {
+  handleEvent: EventListenerFunction<E>;
 };
 
 /**
