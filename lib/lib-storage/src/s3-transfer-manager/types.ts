@@ -11,7 +11,7 @@ import type {
 } from "@aws-sdk/client-s3";
 import { HttpHandlerOptions } from "@smithy/types";
 
-import { AddEventListenerOptions, EventHandler, RemoveEventListenerOptions } from "./event-handler-types";
+import { AddEventListenerOptions, EventListener, RemoveEventListenerOptions } from "./event-listener-types";
 
 /**
  * Constructor parameters for the S3 Transfer Manager configuration.
@@ -201,25 +201,25 @@ export interface S3TransferManager {
    */
   addEventListener(
     type: "transferInitiated",
-    callback: EventHandler<TransferEvent>,
+    callback: EventListener<TransferEvent>,
     options?: AddEventListenerOptions | boolean
   ): void;
   addEventListener(
     type: "bytesTransferred",
-    callback: EventHandler<TransferEvent>,
+    callback: EventListener<TransferEvent>,
     options?: AddEventListenerOptions | boolean
   ): void;
   addEventListener(
     type: "transferComplete",
-    callback: EventHandler<TransferCompleteEvent>,
+    callback: EventListener<TransferCompleteEvent>,
     options?: AddEventListenerOptions | boolean
   ): void;
   addEventListener(
     type: "transferFailed",
-    callback: EventHandler<TransferEvent>,
+    callback: EventListener<TransferEvent>,
     options?: AddEventListenerOptions | boolean
   ): void;
-  addEventListener(type: string, callback: EventHandler | null, options?: AddEventListenerOptions | boolean): void;
+  addEventListener(type: string, callback: EventListener | null, options?: AddEventListenerOptions | boolean): void;
 
   /**
    * Dispatches an event to the registered event listeners.
@@ -246,27 +246,27 @@ export interface S3TransferManager {
    */
   removeEventListener(
     type: "transferInitiated",
-    callback: EventHandler<TransferEvent>,
+    callback: EventListener<TransferEvent>,
     options?: RemoveEventListenerOptions | boolean
   ): void;
   removeEventListener(
     type: "bytesTransferred",
-    callback: EventHandler<TransferEvent>,
+    callback: EventListener<TransferEvent>,
     options?: RemoveEventListenerOptions | boolean
   ): void;
   removeEventListener(
     type: "transferComplete",
-    callback: EventHandler<TransferCompleteEvent>,
+    callback: EventListener<TransferCompleteEvent>,
     options?: RemoveEventListenerOptions | boolean
   ): void;
   removeEventListener(
     type: "transferFailed",
-    callback: EventHandler<TransferEvent>,
+    callback: EventListener<TransferEvent>,
     options?: RemoveEventListenerOptions | boolean
   ): void;
   removeEventListener(
     type: string,
-    callback: EventHandler | null,
+    callback: EventListener | null,
     options?: RemoveEventListenerOptions | boolean
   ): void;
 }
@@ -329,8 +329,8 @@ export interface TransferCompleteEvent extends TransferEvent {
  * @public
  */
 export interface TransferEventListeners {
-  transferInitiated: EventHandler<TransferEvent>[];
-  bytesTransferred: EventHandler<TransferEvent>[];
-  transferComplete: EventHandler<TransferCompleteEvent>[];
-  transferFailed: EventHandler<TransferEvent>[];
+  transferInitiated: EventListener<TransferEvent>[];
+  bytesTransferred: EventListener<TransferEvent>[];
+  transferComplete: EventListener<TransferCompleteEvent>[];
+  transferFailed: EventListener<TransferEvent>[];
 }

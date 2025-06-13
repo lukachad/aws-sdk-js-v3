@@ -10,7 +10,7 @@ import {
   TransferEvent,
   TransferEventListeners,
   TransferProgressSnapshot,
-} from "../transfer-manager-types"; // would be "@aws-sdk/lib-storage"
+} from "../types"; // would be "@aws-sdk/lib-storage"
 
 // Test variables:
 const testBucket = "test-bucket";
