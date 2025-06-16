@@ -101,10 +101,7 @@ export type TransferOptions = HttpHandlerOptions & { eventListeners?: TransferEv
  *
  * @public
  */
-export interface S3TransferManager {
-  // eslint-disable-next-line @typescript-eslint/no-misused-new
-  new (config?: S3TransferManagerConfig): S3TransferManager;
-
+export interface IS3TransferManager {
   /**
    * Lets users upload single objects from a given directory to a given bucket.
    * Supports multipart upload, single object upload, and transfer progress listeners.
