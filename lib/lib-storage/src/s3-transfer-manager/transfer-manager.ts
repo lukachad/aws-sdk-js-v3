@@ -9,6 +9,7 @@ import type {
   PutObjectCommandOutput,
 } from "@aws-sdk/client-s3";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { PassThrough, Readable } from "node:stream";
 
 import type { AddEventListenerOptions, EventListener, RemoveEventListenerOptions } from "./event-listener-types";
 import type {
@@ -30,20 +31,21 @@ export class S3TransferManager implements IS3TransferManager {
   private static MIN_UPLOAD_THRESHOLD = 16 * 1024 * 1024; // 16MB
 
   private readonly s3ClientInstance: S3Client;
-  private readonly targetPartSizeBytes: number = S3TransferManager.DEFAULT_PART_SIZE;
-  private readonly multipartUploadThresholdBytes: number = S3TransferManager.MIN_UPLOAD_THRESHOLD;
-  private readonly checksumValidationEnabled: boolean = true;
-  private readonly checksumAlgorithm: string = "CRC32";
-  private readonly multipartDownloadType: string = "PART";
+  private readonly targetPartSizeBytes: number;
+  private readonly multipartUploadThresholdBytes: number;
+  private readonly checksumValidationEnabled: boolean;
+  private readonly checksumAlgorithm: ChecksumAlgorithm;
+  private readonly multipartDownloadType: "PART" | "RANGE";
   private readonly eventListeners: TransferEventListeners;
 
   public constructor(config: S3TransferManagerConfig = {}) {
     this.s3ClientInstance = config.s3ClientInstance ?? new S3Client({});
-    this.targetPartSizeBytes = config.targetPartSizeBytes ?? this.targetPartSizeBytes;
-    this.multipartUploadThresholdBytes = config.multipartUploadThresholdBytes ?? this.multipartUploadThresholdBytes;
-    this.checksumValidationEnabled = config.checksumValidationEnabled ?? this.checksumValidationEnabled;
-    this.checksumAlgorithm = config.checksumAlgorithm ?? this.checksumAlgorithm;
-    this.multipartDownloadType = config.multipartDownloadType ?? this.multipartDownloadType;
+
+    this.targetPartSizeBytes = config.targetPartSizeBytes ?? S3TransferManager.DEFAULT_PART_SIZE;
+    this.multipartUploadThresholdBytes = config.multipartUploadThresholdBytes ?? S3TransferManager.MIN_UPLOAD_THRESHOLD;
+    this.checksumValidationEnabled = config.checksumValidationEnabled ?? true;
+    this.checksumAlgorithm = config.checksumAlgorithm ?? "CRC32";
+    this.multipartDownloadType = config.multipartDownloadType ?? "PART";
     this.eventListeners = {
       transferInitiated: config.eventListeners?.transferInitiated ?? [],
       bytesTransferred: config.eventListeners?.bytesTransferred ?? [],
@@ -51,7 +53,7 @@ export class S3TransferManager implements IS3TransferManager {
       transferFailed: config.eventListeners?.transferFailed ?? [],
     };
 
-    this.__validateConfig();
+    this.validateConfig();
   }
 
   public addEventListener(
@@ -124,42 +126,46 @@ export class S3TransferManager implements IS3TransferManager {
   }
 
   public async download(request: DownloadRequest, transferOptions?: TransferOptions): Promise<DownloadResponse> {
-    let isSingleObjectRequest = true;
-    const partNumber = request.PartNumber?.valueOf();
-    const range = request.Range?.valueOf();
+    const metadata = {} as Omit<DownloadResponse, "Body">;
+    const streams = [] as Readable[];
 
-    if (partNumber != null) {
-      isSingleObjectRequest = true;
-    }
+    const partNumber = request.PartNumber;
+    const range = request.Range;
 
-    if (this.multipartDownloadType == "PART") {
+    if (typeof partNumber === "number") {
+      throw new Error("placeholder: single object download");
+    } else if (this.multipartDownloadType === "PART") {
       if (range == null) {
-        const newRequest = { ...request };
-        newRequest.PartNumber = 1;
-        const response = await this.s3ClientInstance.send(new GetObjectCommand(newRequest), transferOptions);
-        const partsCount = response.PartsCount?.valueOf() ?? 0;
-        if (partsCount > 1) {
-          // Use Multipart Download
-          isSingleObjectRequest = false;
+        const getObject = await this.s3ClientInstance.send(
+          new GetObjectCommand({
+            ...request,
+            PartNumber: 1,
+          }),
+          transferOptions
+        );
+
+        if (getObject.PartsCount! > 1) {
+          throw new Error("placeholder: multi part download");
+        } else {
+          throw new Error("placeholder: single object download");
         }
       } else {
-        isSingleObjectRequest = true;
-        return this.__singleObjectDownload(request, transferOptions);
+        const getObject = await this.s3ClientInstance.send(new GetObjectCommand(request), transferOptions);
+        Object.assign(metadata, getObject, { Body: undefined });
+        streams.push(getObject.Body as any); // fix this type
       }
-    } else {
-      // if (this.multipartDownloadType == 'RANGE')
-      // Use Multipart Download
-      console.log("This is a RANGE download");
-      isSingleObjectRequest = false;
-
+    } else if (this.multipartDownloadType == "RANGE") {
+      // MPD entire object
       if (range == null) {
-        console.log("RANGE is null, performing loop");
-        const newRequest = { ...request };
-        const response = await this.s3ClientInstance.send(new GetObjectCommand(newRequest), transferOptions);
-        const contentLength = response.ContentLength?.valueOf() ?? 0; // Get total size of the object
+        const initialRangeGet = await this.s3ClientInstance.send(
+          new GetObjectCommand({
+            ...request,
+            Range: `bytes=0-${S3TransferManager.MIN_PART_SIZE}`,
+          }),
+          transferOptions
+        );
+        const contentLength = initialRangeGet.ContentLength ?? 0; // Get total size of the object
         console.log(`Content Length: ${contentLength}`);
-
-        newRequest.Range = `bytes=0-${S3TransferManager.MIN_PART_SIZE}`;
 
         // Perform Multipart Download
         // Check ContentLength from the response. If the contentLength is larger than the MIN_PART_SIZE, continue to send more parts until the last part is finished.
@@ -167,38 +173,54 @@ export class S3TransferManager implements IS3TransferManager {
           let left = 0;
           let right = S3TransferManager.MIN_PART_SIZE;
           let remainingLength = contentLength;
+
           while (remainingLength > S3TransferManager.MIN_PART_SIZE) {
+            const range = `bytes=${left}-${right}`;
+
             console.log(`Remaining Length: ${remainingLength}`);
+            console.log(range);
 
-            newRequest.Range = `bytes=${left}-${right}`;
-
-            console.log(newRequest.Range);
-
-            await this.s3ClientInstance.send(new GetObjectCommand(newRequest), transferOptions);
+            await this.s3ClientInstance.send(
+              new GetObjectCommand({
+                ...request,
+                Range: range,
+              }),
+              transferOptions
+            );
             remainingLength = contentLength - right;
 
             left = right + 1;
             right = right + S3TransferManager.MIN_PART_SIZE;
           }
-          console.log(remainingLength);
-          newRequest.Range = `bytes=${right + 1}-${contentLength}`;
-          return await this.s3ClientInstance.send(new GetObjectCommand(newRequest), transferOptions);
+
+          // Download the rest of the object
+          console.log({ remainingLength });
+
+          return await this.s3ClientInstance.send(
+            new GetObjectCommand({
+              ...request,
+              Range: `bytes=${right + 1}-${contentLength}`,
+            }),
+            transferOptions
+          );
         }
       } else {
-        // Perform Multipart Download
+        // MPD user-specified range
         // Treat range as the total content length and split the range based on the MIN_PART_SIZE
       }
     }
 
-    return this.__singleObjectDownload(request, transferOptions);
-  }
+    const userStream = new PassThrough();
+    streams.forEach((stream) => {
+      // connect all the streams together without buffering
+      // their data.
+      stream.pipe(userStream);
+    });
 
-  private async __singleObjectDownload(
-    request: DownloadRequest,
-    transferOptions?: TransferOptions
-  ): Promise<GetObjectCommandOutput> {
-    const getObjectOutput = await this.s3ClientInstance.send(new GetObjectCommand(request), transferOptions);
-    return getObjectOutput;
+    return {
+      ...metadata,
+      Body: userStream as any,
+    };
   }
 
   public uploadAll(options: {
@@ -230,7 +252,7 @@ export class S3TransferManager implements IS3TransferManager {
     throw new Error("Method not implemented.");
   }
 
-  private __validateConfig(): void {
+  private validateConfig(): void {
     if (this.targetPartSizeBytes < S3TransferManager.MIN_PART_SIZE) {
       throw new Error(`targetPartSizeBytes must be at least ${S3TransferManager.MIN_PART_SIZE} bytes`);
     }
