@@ -144,32 +144,53 @@ export class S3TransferManager implements IS3TransferManager {
         }
       } else {
         isSingleObjectRequest = true;
+        return this.__singleObjectDownload(request, transferOptions);
       }
     } else {
       // if (this.multipartDownloadType == 'RANGE')
       // Use Multipart Download
+      console.log("This is a RANGE download");
       isSingleObjectRequest = false;
 
       if (range == null) {
+        console.log("RANGE is null, performing loop");
         const newRequest = { ...request };
-        newRequest.Range = `bytes=0-${S3TransferManager.MIN_PART_SIZE}`;
         const response = await this.s3ClientInstance.send(new GetObjectCommand(newRequest), transferOptions);
-        const contentLength = response.ContentLength?.valueOf() ?? 0;
+        const contentLength = response.ContentLength?.valueOf() ?? 0; // Get total size of the object
+        console.log(`Content Length: ${contentLength}`);
+
+        newRequest.Range = `bytes=0-${S3TransferManager.MIN_PART_SIZE}`;
+
         // Perform Multipart Download
         // Check ContentLength from the response. If the contentLength is larger than the MIN_PART_SIZE, continue to send more parts until the last part is finished.
+        if (contentLength > 0) {
+          let left = 0;
+          let right = S3TransferManager.MIN_PART_SIZE;
+          let remainingLength = contentLength;
+          while (remainingLength > S3TransferManager.MIN_PART_SIZE) {
+            console.log(`Remaining Length: ${remainingLength}`);
+
+            newRequest.Range = `bytes=${left}-${right}`;
+
+            console.log(newRequest.Range);
+
+            await this.s3ClientInstance.send(new GetObjectCommand(newRequest), transferOptions);
+            remainingLength = contentLength - right;
+
+            left = right + 1;
+            right = right + S3TransferManager.MIN_PART_SIZE;
+          }
+          console.log(remainingLength);
+          newRequest.Range = `bytes=${right + 1}-${contentLength}`;
+          return await this.s3ClientInstance.send(new GetObjectCommand(newRequest), transferOptions);
+        }
       } else {
         // Perform Multipart Download
         // Treat range as the total content length and split the range based on the MIN_PART_SIZE
       }
     }
 
-    if (isSingleObjectRequest) {
-      console.log("use single object download");
-      return this.__singleObjectDownload(request, transferOptions);
-    } else {
-      console.log("use multipart download");
-      return this.__singleObjectDownload(request, transferOptions);
-    }
+    return this.__singleObjectDownload(request, transferOptions);
   }
 
   private async __singleObjectDownload(
@@ -178,11 +199,6 @@ export class S3TransferManager implements IS3TransferManager {
   ): Promise<GetObjectCommandOutput> {
     const getObjectOutput = await this.s3ClientInstance.send(new GetObjectCommand(request), transferOptions);
     return getObjectOutput;
-  }
-
-  // Is range parser required? Example range input: "bytes=0-1023"
-  private __parseRange() {
-    throw new Error("Method not implemented.");
   }
 
   public uploadAll(options: {
