@@ -9,10 +9,12 @@ import type {
   PutObjectCommandOutput,
 } from "@aws-sdk/client-s3";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { PassThrough, Readable } from "node:stream";
-import { number } from "yargs";
+import { StreamingBlobPayloadOutputTypes } from "@smithy/types";
+import { sdkStreamMixin } from "@smithy/util-stream";
+import { PassThrough, Readable } from "node:stream"; // instead of using node, defer to
 
 import type { AddEventListenerOptions, EventListener, RemoveEventListenerOptions } from "./event-listener-types";
+import { joinStreams } from "./join-streams";
 import { isNodeStream } from "./stream-guards";
 import { isWebStream } from "./stream-guards.browser";
 import type {
@@ -130,7 +132,7 @@ export class S3TransferManager implements IS3TransferManager {
 
   public async download(request: DownloadRequest, transferOptions?: TransferOptions): Promise<DownloadResponse> {
     const metadata = {} as Omit<DownloadResponse, "Body">;
-    const streams = [] as Readable[];
+    const streams = [] as StreamingBlobPayloadOutputTypes[];
 
     const partNumber = request.PartNumber;
     const range = request.Range;
@@ -145,24 +147,26 @@ export class S3TransferManager implements IS3TransferManager {
       );
 
       Object.assign(metadata, getObject, { Body: undefined });
-      if (isNodeStream(getObject.Body)) {
-        streams.push(Readable.from(getObject.Body!));
-      } else if (isWebStream(getObject.Body)) {
-        streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+      if (getObject.Body) {
+        streams.push(getObject.Body);
       }
     } else if (this.multipartDownloadType === "PART") {
       if (range == null) {
-        const getObject = await this.s3ClientInstance.send(
+        const initialPart = await this.s3ClientInstance.send(
           new GetObjectCommand({
             ...request,
             PartNumber: 1,
           }),
           transferOptions
         );
+        Object.assign(metadata, initialPart, { Body: undefined });
+        if (initialPart.Body) {
+          streams.push(initialPart.Body);
+        }
 
-        if (getObject.PartsCount! > 1) {
+        if (initialPart.PartsCount! > 1) {
           // MPD entire object
-          for (let part = 1; part < getObject.PartsCount!; part++) {
+          for (let part = 2; part <= initialPart.PartsCount!; part++) {
             const getObject = await this.s3ClientInstance.send(
               new GetObjectCommand({
                 ...request,
@@ -172,10 +176,8 @@ export class S3TransferManager implements IS3TransferManager {
             );
 
             Object.assign(metadata, getObject, { Body: undefined });
-            if (isNodeStream(getObject.Body)) {
-              streams.push(Readable.from(getObject.Body!));
-            } else if (isWebStream(getObject.Body)) {
-              streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+            if (getObject.Body) {
+              streams.push(getObject.Body);
             }
           }
         } else {
@@ -188,10 +190,8 @@ export class S3TransferManager implements IS3TransferManager {
           );
 
           Object.assign(metadata, getObject, { Body: undefined });
-          if (isNodeStream(getObject.Body)) {
-            streams.push(Readable.from(getObject.Body!));
-          } else if (isWebStream(getObject.Body)) {
-            streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+          if (getObject.Body) {
+            streams.push(getObject.Body);
           }
         }
       } else {
@@ -203,10 +203,8 @@ export class S3TransferManager implements IS3TransferManager {
         );
 
         Object.assign(metadata, getObject, { Body: undefined });
-        if (isNodeStream(getObject.Body)) {
-          streams.push(Readable.from(getObject.Body!));
-        } else if (isWebStream(getObject.Body)) {
-          streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+        if (getObject.Body) {
+          streams.push(getObject.Body);
         }
       }
     } else if (this.multipartDownloadType === "RANGE") {
@@ -248,10 +246,8 @@ export class S3TransferManager implements IS3TransferManager {
             right = right + S3TransferManager.MIN_PART_SIZE;
 
             Object.assign(metadata, getObject, { Body: undefined });
-            if (isNodeStream(getObject.Body)) {
-              streams.push(Readable.from(getObject.Body!));
-            } else if (isWebStream(getObject.Body)) {
-              streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+            if (getObject.Body) {
+              streams.push(getObject.Body);
             }
           }
 
@@ -267,10 +263,8 @@ export class S3TransferManager implements IS3TransferManager {
           );
 
           Object.assign(metadata, getObject, { Body: undefined });
-          if (isNodeStream(getObject.Body)) {
-            streams.push(Readable.from(getObject.Body!));
-          } else if (isWebStream(getObject.Body)) {
-            streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+          if (getObject.Body) {
+            streams.push(getObject.Body);
           }
         }
       } else {
@@ -279,16 +273,9 @@ export class S3TransferManager implements IS3TransferManager {
       }
     }
 
-    const userStream = new PassThrough();
-    streams.forEach((stream) => {
-      // connect all the streams together without buffering
-      // their data.
-      stream.pipe(userStream);
-    });
-
     return {
       ...metadata,
-      Body: userStream as any,
+      Body: joinStreams(streams),
     };
   }
 
@@ -319,6 +306,26 @@ export class S3TransferManager implements IS3TransferManager {
     transferOptions?: TransferOptions;
   }): Promise<{ objectsDownloaded: number; objectsFailed: number }> {
     throw new Error("Method not implemented.");
+  }
+
+  protected joinStreams(streams: StreamingBlobPayloadOutputTypes[]): StreamingBlobPayloadOutputTypes {
+    if (streams.length === 1) {
+      return streams[0];
+    }
+    return sdkStreamMixin(Readable.from(this.iterateStreams(streams)));
+  }
+
+  protected async *iterateStreams(
+    streams: StreamingBlobPayloadOutputTypes[]
+  ): AsyncIterable<StreamingBlobPayloadOutputTypes, void, void> {
+    for (const stream of streams) {
+      // replace with type check
+      if (stream instanceof Readable) {
+        for await (const chunk of stream) {
+          yield chunk;
+        }
+      }
+    }
   }
 
   private validateConfig(): void {
