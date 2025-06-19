@@ -10,8 +10,11 @@ import type {
 } from "@aws-sdk/client-s3";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { PassThrough, Readable } from "node:stream";
+import { number } from "yargs";
 
 import type { AddEventListenerOptions, EventListener, RemoveEventListenerOptions } from "./event-listener-types";
+import { isNodeStream } from "./stream-guards";
+import { isWebStream } from "./stream-guards.browser";
 import type {
   DownloadRequest,
   DownloadResponse,
@@ -133,7 +136,20 @@ export class S3TransferManager implements IS3TransferManager {
     const range = request.Range;
 
     if (typeof partNumber === "number") {
-      throw new Error("placeholder: single object download");
+      // single object download
+      const getObject = await this.s3ClientInstance.send(
+        new GetObjectCommand({
+          ...request,
+        }),
+        transferOptions
+      );
+
+      Object.assign(metadata, getObject, { Body: undefined });
+      if (isNodeStream(getObject.Body)) {
+        streams.push(Readable.from(getObject.Body!));
+      } else if (isWebStream(getObject.Body)) {
+        streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+      }
     } else if (this.multipartDownloadType === "PART") {
       if (range == null) {
         const getObject = await this.s3ClientInstance.send(
@@ -145,16 +161,55 @@ export class S3TransferManager implements IS3TransferManager {
         );
 
         if (getObject.PartsCount! > 1) {
-          throw new Error("placeholder: multi part download");
+          // MPD entire object
+          for (let part = 1; part < getObject.PartsCount!; part++) {
+            const getObject = await this.s3ClientInstance.send(
+              new GetObjectCommand({
+                ...request,
+                PartNumber: part,
+              }),
+              transferOptions
+            );
+
+            Object.assign(metadata, getObject, { Body: undefined });
+            if (isNodeStream(getObject.Body)) {
+              streams.push(Readable.from(getObject.Body!));
+            } else if (isWebStream(getObject.Body)) {
+              streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+            }
+          }
         } else {
-          throw new Error("placeholder: single object download");
+          // single object download
+          const getObject = await this.s3ClientInstance.send(
+            new GetObjectCommand({
+              ...request,
+            }),
+            transferOptions
+          );
+
+          Object.assign(metadata, getObject, { Body: undefined });
+          if (isNodeStream(getObject.Body)) {
+            streams.push(Readable.from(getObject.Body!));
+          } else if (isWebStream(getObject.Body)) {
+            streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+          }
         }
       } else {
-        const getObject = await this.s3ClientInstance.send(new GetObjectCommand(request), transferOptions);
+        const getObject = await this.s3ClientInstance.send(
+          new GetObjectCommand({
+            ...request,
+          }),
+          transferOptions
+        );
+
         Object.assign(metadata, getObject, { Body: undefined });
-        streams.push(getObject.Body as any); // fix this type
+        if (isNodeStream(getObject.Body)) {
+          streams.push(Readable.from(getObject.Body!));
+        } else if (isWebStream(getObject.Body)) {
+          streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+        }
       }
-    } else if (this.multipartDownloadType == "RANGE") {
+    } else if (this.multipartDownloadType === "RANGE") {
       // MPD entire object
       if (range == null) {
         const initialRangeGet = await this.s3ClientInstance.send(
@@ -180,7 +235,7 @@ export class S3TransferManager implements IS3TransferManager {
             console.log(`Remaining Length: ${remainingLength}`);
             console.log(range);
 
-            await this.s3ClientInstance.send(
+            const getObject = await this.s3ClientInstance.send(
               new GetObjectCommand({
                 ...request,
                 Range: range,
@@ -191,18 +246,32 @@ export class S3TransferManager implements IS3TransferManager {
 
             left = right + 1;
             right = right + S3TransferManager.MIN_PART_SIZE;
+
+            Object.assign(metadata, getObject, { Body: undefined });
+            if (isNodeStream(getObject.Body)) {
+              streams.push(Readable.from(getObject.Body!));
+            } else if (isWebStream(getObject.Body)) {
+              streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+            }
           }
 
           // Download the rest of the object
           console.log({ remainingLength });
 
-          return await this.s3ClientInstance.send(
+          const getObject = await this.s3ClientInstance.send(
             new GetObjectCommand({
               ...request,
               Range: `bytes=${right + 1}-${contentLength}`,
             }),
             transferOptions
           );
+
+          Object.assign(metadata, getObject, { Body: undefined });
+          if (isNodeStream(getObject.Body)) {
+            streams.push(Readable.from(getObject.Body!));
+          } else if (isWebStream(getObject.Body)) {
+            streams.push(Readable.fromWeb(getObject.Body.transformToWebStream())); // fix type error
+          }
         }
       } else {
         // MPD user-specified range
