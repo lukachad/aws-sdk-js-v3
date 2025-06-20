@@ -1,4 +1,7 @@
 // * confirm if filestream fits here *
+
+import { Readable } from "stream";
+
 // will not work with browser because no readable in browser
 export function isNodeStream(stream: unknown): stream is Readable {
   return typeof stream === "object" && stream !== null && "pipe" in stream && typeof stream.pipe === "function";

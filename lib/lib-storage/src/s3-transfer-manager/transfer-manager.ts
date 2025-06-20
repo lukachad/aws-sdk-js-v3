@@ -10,13 +10,12 @@ import type {
 } from "@aws-sdk/client-s3";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { StreamingBlobPayloadOutputTypes } from "@smithy/types";
-import { sdkStreamMixin } from "@smithy/util-stream";
+import { isReadableStream, sdkStreamMixin } from "@smithy/util-stream";
 import { PassThrough, Readable } from "node:stream"; // instead of using node, defer to
 
 import type { AddEventListenerOptions, EventListener, RemoveEventListenerOptions } from "./event-listener-types";
 import { joinStreams } from "./join-streams";
-import { isNodeStream } from "./stream-guards";
-import { isWebStream } from "./stream-guards.browser";
+import { isNodeStream, isWebStream } from "./stream-guards";
 import type {
   DownloadRequest,
   DownloadResponse,
@@ -272,7 +271,6 @@ export class S3TransferManager implements IS3TransferManager {
         // Treat range as the total content length and split the range based on the MIN_PART_SIZE
       }
     }
-
     return {
       ...metadata,
       Body: joinStreams(streams),
@@ -308,25 +306,25 @@ export class S3TransferManager implements IS3TransferManager {
     throw new Error("Method not implemented.");
   }
 
-  protected joinStreams(streams: StreamingBlobPayloadOutputTypes[]): StreamingBlobPayloadOutputTypes {
-    if (streams.length === 1) {
-      return streams[0];
-    }
-    return sdkStreamMixin(Readable.from(this.iterateStreams(streams)));
-  }
+  // protected joinStreams(streams: StreamingBlobPayloadOutputTypes[]): StreamingBlobPayloadOutputTypes {
+  //   if (streams.length === 1) {
+  //     return streams[0];
+  //   }
+  //   return sdkStreamMixin(Readable.from(this.iterateStreams(streams)));
+  // }
 
-  protected async *iterateStreams(
-    streams: StreamingBlobPayloadOutputTypes[]
-  ): AsyncIterable<StreamingBlobPayloadOutputTypes, void, void> {
-    for (const stream of streams) {
-      // replace with type check
-      if (stream instanceof Readable) {
-        for await (const chunk of stream) {
-          yield chunk;
-        }
-      }
-    }
-  }
+  // protected async *iterateStreams(
+  //   streams: StreamingBlobPayloadOutputTypes[]
+  // ): AsyncIterable<StreamingBlobPayloadOutputTypes, void, void> {
+  //   for (const stream of streams) {
+  //     // replace with type check
+  //     if (stream instanceof Readable) {
+  //       for await (const chunk of stream) {
+  //         yield chunk;
+  //       }
+  //     }
+  //   }
+  // }
 
   private validateConfig(): void {
     if (this.targetPartSizeBytes < S3TransferManager.MIN_PART_SIZE) {
