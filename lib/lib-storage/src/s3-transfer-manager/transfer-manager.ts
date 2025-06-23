@@ -209,57 +209,64 @@ export class S3TransferManager implements IS3TransferManager {
     } else if (this.multipartDownloadType === "RANGE") {
       // MPD entire object
       if (range == null) {
-        const initialRangeGet = await this.s3ClientInstance.send(
+        console.log("Case 1: range == null");
+
+        const getContentLength = await this.s3ClientInstance.send(
           new GetObjectCommand({
             ...request,
-            Range: `bytes=0-${S3TransferManager.MIN_PART_SIZE}`,
           }),
           transferOptions
         );
-        const contentLength = initialRangeGet.ContentLength ?? 0; // Get total size of the object
+        const contentLength = getContentLength.ContentLength ?? 0; // Get total size of the object
         console.log(`Content Length: ${contentLength}`);
 
-        // Perform Multipart Download
-        // Check ContentLength from the response. If the contentLength is larger than the MIN_PART_SIZE, continue to send more parts until the last part is finished.
-        if (contentLength > 0) {
-          let left = 0;
-          let right = S3TransferManager.MIN_PART_SIZE;
-          let remainingLength = contentLength;
+        let left = 0;
+        let right = 0;
+        let remainingLength = contentLength;
 
-          while (remainingLength > S3TransferManager.MIN_PART_SIZE) {
-            const range = `bytes=${left}-${right}`;
-
-            console.log(`Remaining Length: ${remainingLength}`);
-            console.log(range);
-
-            const getObject = await this.s3ClientInstance.send(
-              new GetObjectCommand({
-                ...request,
-                Range: range,
-              }),
-              transferOptions
-            );
-            remainingLength = contentLength - right;
-
+        while (remainingLength > S3TransferManager.MIN_PART_SIZE) {
+          if (right === 0) {
+            // Prevents overlap of bytes
+            left = right;
+          } else {
             left = right + 1;
-            right = right + S3TransferManager.MIN_PART_SIZE;
-
-            Object.assign(metadata, getObject, { Body: undefined });
-            if (getObject.Body) {
-              streams.push(getObject.Body);
-            }
+            right = right + 1;
           }
+          right += S3TransferManager.MIN_PART_SIZE;
+          const range = `bytes=${left}-${right}`;
 
-          // Download the rest of the object
-          console.log({ remainingLength });
+          console.log(`range: ${range}`);
 
           const getObject = await this.s3ClientInstance.send(
             new GetObjectCommand({
               ...request,
-              Range: `bytes=${right + 1}-${contentLength}`,
+              Range: range,
             }),
             transferOptions
           );
+
+          Object.assign(metadata, getObject, { Body: undefined });
+          if (getObject.Body) {
+            streams.push(getObject.Body);
+          }
+
+          remainingLength = contentLength - right;
+          console.log(`Remaining Length: ${remainingLength}`);
+        }
+
+        console.log({ remainingLength });
+
+        if (remainingLength > 0) {
+          // Download the rest of the object
+          const getObject = await this.s3ClientInstance.send(
+            new GetObjectCommand({
+              ...request,
+              Range: `bytes=${right + 1}-${contentLength - 1}`,
+            }),
+            transferOptions
+          );
+
+          console.log(`range: bytes=${right + 1}-${contentLength - 1}`);
 
           Object.assign(metadata, getObject, { Body: undefined });
           if (getObject.Body) {
@@ -269,6 +276,63 @@ export class S3TransferManager implements IS3TransferManager {
       } else {
         // MPD user-specified range
         // Treat range as the total content length and split the range based on the MIN_PART_SIZE
+        console.log("Case 2: user-specified range");
+
+        const contentLength = parseInt(range.split("-")[1]);
+        console.log(`Content Length: ${contentLength}`);
+        let left = 0;
+        let right = 0;
+        let remainingLength = contentLength;
+
+        while (remainingLength > S3TransferManager.MIN_PART_SIZE) {
+          if (right === 0) {
+            // Prevents overlap of bytes
+            left = right;
+          } else {
+            left = right + 1;
+            right = right + 1;
+          }
+          right += S3TransferManager.MIN_PART_SIZE;
+
+          const range = `bytes=${left}-${right}`;
+
+          console.log(`range: ${range}`);
+
+          const getObject = await this.s3ClientInstance.send(
+            new GetObjectCommand({
+              ...request,
+              Range: range,
+            }),
+            transferOptions
+          );
+
+          Object.assign(metadata, getObject, { Body: undefined });
+          if (getObject.Body) {
+            streams.push(getObject.Body);
+          }
+
+          remainingLength = contentLength - right;
+          console.log(`Remaining Length: ${remainingLength}`);
+        }
+
+        console.log({ remainingLength });
+
+        if (remainingLength > 0) {
+          // Download the rest of the object
+          const getObject = await this.s3ClientInstance.send(
+            new GetObjectCommand({
+              ...request,
+              Range: `bytes=${right + 1}-${contentLength - 1}`,
+            }),
+            transferOptions
+          );
+
+          console.log(`range: bytes=${right + 1}-${contentLength - 1}`);
+          Object.assign(metadata, getObject, { Body: undefined });
+          if (getObject.Body) {
+            streams.push(getObject.Body);
+          }
+        }
       }
     }
     return {
