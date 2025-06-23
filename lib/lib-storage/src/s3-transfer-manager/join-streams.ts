@@ -10,15 +10,15 @@ export function joinStreams(streams: StreamingBlobPayloadOutputTypes[]): Streami
   if (streams.length === 1) {
     return streams[0];
   } else if (isReadableStream(streams[0])) {
-    // const newReadableStream = new ReadableStream({
-    //   async start(controller) {
-    //     for await (const chunk of iterateStreams(streams)) {
-    //       controller.enqueue(chunk);
-    //     }
-    //     controller.close();
-    //   },
-    // });
-    return sdkStreamMixin(ReadableStream.from(iterateStreams(streams)));
+    const newReadableStream = new ReadableStream({
+      async start(controller) {
+        for await (const chunk of iterateStreams(streams)) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+    return sdkStreamMixin(newReadableStream);
   } else if (isBlob(streams[0])) {
     throw new Error("Blob not supported yet");
   } else {
@@ -32,9 +32,7 @@ export async function* iterateStreams(
   let total = 0;
   for (const stream of streams) {
     if (isReadableStream(stream)) {
-      // console.log("new readable stream");
       const reader = stream.getReader();
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
@@ -42,16 +40,8 @@ export async function* iterateStreams(
         }
         yield value;
         total += value.byteLength;
-        // console.log({
-        //   total,
-        // });
       }
       reader.releaseLock();
-      // for await (const chunk of stream) {
-      //   if (chunk != null) {
-      //     yield chunk;
-      //   }
-      // }
     } else if (isBlob(stream)) {
       throw new Error("Blob not supported yet");
     } else if (stream instanceof Readable) {
