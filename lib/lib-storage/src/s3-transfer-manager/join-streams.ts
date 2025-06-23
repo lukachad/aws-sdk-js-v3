@@ -9,7 +9,7 @@ export function joinStreams(streams: StreamingBlobPayloadOutputTypes[]): Streami
 
   if (streams.length === 1) {
     return streams[0];
-  } else if (isReadableStream(streams[0]) || isBlob(streams[0])) {
+  } else if (isReadableStream(streams[0])) {
     const newReadableStream = new ReadableStream({
       async start(controller) {
         for await (const chunk of iterateStreams(streams)) {
@@ -19,6 +19,8 @@ export function joinStreams(streams: StreamingBlobPayloadOutputTypes[]): Streami
       },
     });
     return sdkStreamMixin(newReadableStream);
+  } else if (isBlob(streams[0])) {
+    throw new Error("Blob not supported yet");
   } else {
     return sdkStreamMixin(Readable.from(iterateStreams(streams)));
   }
@@ -39,8 +41,9 @@ export async function* iterateStreams(
       } finally {
         reader.releaseLock();
       }
-    }
-    if (stream instanceof Readable) {
+    } else if (isBlob(stream)) {
+      throw new Error("Blob not supported yet");
+    } else if (stream instanceof Readable) {
       for await (const chunk of stream) {
         yield chunk;
       }
