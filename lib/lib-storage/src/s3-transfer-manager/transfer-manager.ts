@@ -8,7 +8,7 @@ import type {
   PutObjectCommandInput,
   PutObjectCommandOutput,
 } from "@aws-sdk/client-s3";
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, S3, S3Client } from "@aws-sdk/client-s3";
 import { StreamingBlobPayloadOutputTypes } from "@smithy/types";
 import { isReadableStream, sdkStreamMixin } from "@smithy/util-stream";
 import { PassThrough, Readable } from "node:stream"; // instead of using node, defer to
@@ -145,10 +145,10 @@ export class S3TransferManager implements IS3TransferManager {
         transferOptions
       );
 
-      Object.assign(metadata, getObject, { Body: undefined });
       if (getObject.Body) {
         streams.push(getObject.Body);
       }
+      this.assignMetadata(metadata, getObject);
     } else if (this.multipartDownloadType === "PART") {
       if (range == null) {
         const initialPart = await this.s3ClientInstance.send(
@@ -158,10 +158,11 @@ export class S3TransferManager implements IS3TransferManager {
           }),
           transferOptions
         );
-        Object.assign(metadata, initialPart, { Body: undefined });
+
         if (initialPart.Body) {
           streams.push(initialPart.Body);
         }
+        this.assignMetadata(metadata, initialPart);
 
         if (initialPart.PartsCount! > 1) {
           // MPD entire object
@@ -174,10 +175,10 @@ export class S3TransferManager implements IS3TransferManager {
               transferOptions
             );
 
-            Object.assign(metadata, getObject, { Body: undefined });
             if (getObject.Body) {
               streams.push(getObject.Body);
             }
+            this.assignMetadata(metadata, getObject);
           }
         } else {
           // single object download
@@ -188,10 +189,10 @@ export class S3TransferManager implements IS3TransferManager {
             transferOptions
           );
 
-          Object.assign(metadata, getObject, { Body: undefined });
           if (getObject.Body) {
             streams.push(getObject.Body);
           }
+          this.assignMetadata(metadata, getObject);
         }
       } else {
         const getObject = await this.s3ClientInstance.send(
@@ -201,138 +202,49 @@ export class S3TransferManager implements IS3TransferManager {
           transferOptions
         );
 
-        Object.assign(metadata, getObject, { Body: undefined });
         if (getObject.Body) {
           streams.push(getObject.Body);
         }
+        this.assignMetadata(metadata, getObject);
       }
     } else if (this.multipartDownloadType === "RANGE") {
       // MPD entire object
-      if (range == null) {
-        console.log("Case 1: range == null");
+      let left = 0;
+      let right = S3TransferManager.MIN_PART_SIZE;
+      let maxRange = Infinity;
 
-        const getContentLength = await this.s3ClientInstance.send(
+      if (range != null) {
+        const [userRangeLeft, userRangeRight] = range.replace("bytes=", "").split("-").map(Number);
+
+        maxRange = userRangeRight;
+        left = userRangeLeft;
+        right = Math.min(userRangeRight, left + S3TransferManager.MIN_PART_SIZE);
+      }
+
+      let remainingLength = 1;
+
+      while (remainingLength > 0) {
+        const range = `bytes=${left}-${right}`;
+        const getObject = await this.s3ClientInstance.send(
           new GetObjectCommand({
             ...request,
+            Range: range,
           }),
           transferOptions
         );
-        const contentLength = getContentLength.ContentLength ?? 0; // Get total size of the object
-        console.log(`Content Length: ${contentLength}`);
 
-        let left = 0;
-        let right = 0;
-        let remainingLength = contentLength;
-
-        while (remainingLength > S3TransferManager.MIN_PART_SIZE) {
-          if (right === 0) {
-            // Prevents overlap of bytes
-            left = right;
-          } else {
-            left = right + 1;
-            right = right + 1;
-          }
-          right += S3TransferManager.MIN_PART_SIZE;
-          const range = `bytes=${left}-${right}`;
-
-          console.log(`range: ${range}`);
-
-          const getObject = await this.s3ClientInstance.send(
-            new GetObjectCommand({
-              ...request,
-              Range: range,
-            }),
-            transferOptions
-          );
-
-          Object.assign(metadata, getObject, { Body: undefined });
-          if (getObject.Body) {
-            streams.push(getObject.Body);
-          }
-
-          remainingLength = contentLength - right;
-          console.log(`Remaining Length: ${remainingLength}`);
+        if (getObject.Body) {
+          streams.push(getObject.Body);
         }
+        this.assignMetadata(metadata, getObject);
 
-        console.log({ remainingLength });
+        left = right + 1;
+        right = Math.min(left + S3TransferManager.MIN_PART_SIZE, maxRange);
 
-        if (remainingLength > 0) {
-          // Download the rest of the object
-          const getObject = await this.s3ClientInstance.send(
-            new GetObjectCommand({
-              ...request,
-              Range: `bytes=${right + 1}-${contentLength - 1}`,
-            }),
-            transferOptions
-          );
-
-          console.log(`range: bytes=${right + 1}-${contentLength - 1}`);
-
-          Object.assign(metadata, getObject, { Body: undefined });
-          if (getObject.Body) {
-            streams.push(getObject.Body);
-          }
-        }
-      } else {
-        // MPD user-specified range
-        // Treat range as the total content length and split the range based on the MIN_PART_SIZE
-        console.log("Case 2: user-specified range");
-
-        const contentLength = parseInt(range.split("-")[1]);
-        console.log(`Content Length: ${contentLength}`);
-        let left = 0;
-        let right = 0;
-        let remainingLength = contentLength;
-
-        while (remainingLength > S3TransferManager.MIN_PART_SIZE) {
-          if (right === 0) {
-            // Prevents overlap of bytes
-            left = right;
-          } else {
-            left = right + 1;
-            right = right + 1;
-          }
-          right += S3TransferManager.MIN_PART_SIZE;
-
-          const range = `bytes=${left}-${right}`;
-
-          console.log(`range: ${range}`);
-
-          const getObject = await this.s3ClientInstance.send(
-            new GetObjectCommand({
-              ...request,
-              Range: range,
-            }),
-            transferOptions
-          );
-
-          Object.assign(metadata, getObject, { Body: undefined });
-          if (getObject.Body) {
-            streams.push(getObject.Body);
-          }
-
-          remainingLength = contentLength - right;
-          console.log(`Remaining Length: ${remainingLength}`);
-        }
-
-        console.log({ remainingLength });
-
-        if (remainingLength > 0) {
-          // Download the rest of the object
-          const getObject = await this.s3ClientInstance.send(
-            new GetObjectCommand({
-              ...request,
-              Range: `bytes=${right + 1}-${contentLength - 1}`,
-            }),
-            transferOptions
-          );
-
-          console.log(`range: bytes=${right + 1}-${contentLength - 1}`);
-          Object.assign(metadata, getObject, { Body: undefined });
-          if (getObject.Body) {
-            streams.push(getObject.Body);
-          }
-        }
+        remainingLength = Math.min(
+          right - left,
+          Math.max(0, (getObject.ContentLength ?? 0) - S3TransferManager.MIN_PART_SIZE)
+        );
       }
     }
     return {
@@ -389,6 +301,15 @@ export class S3TransferManager implements IS3TransferManager {
   //     }
   //   }
   // }
+
+  private assignMetadata(container: any, response: any) {
+    for (const key in response) {
+      if (key === "Body") {
+        continue;
+      }
+      container[key] = response[key];
+    }
+  }
 
   private validateConfig(): void {
     if (this.targetPartSizeBytes < S3TransferManager.MIN_PART_SIZE) {
