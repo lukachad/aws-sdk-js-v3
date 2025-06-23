@@ -1,21 +1,14 @@
 import type {
   _Object as S3Object,
   ChecksumAlgorithm,
-  CompleteMultipartUploadCommandOutput,
-  CreateMultipartUploadCommandInput,
   GetObjectCommandInput,
-  GetObjectCommandOutput,
   PutObjectCommandInput,
-  PutObjectCommandOutput,
 } from "@aws-sdk/client-s3";
-import { GetObjectCommand, S3, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { StreamingBlobPayloadOutputTypes } from "@smithy/types";
-import { isReadableStream, sdkStreamMixin } from "@smithy/util-stream";
-import { PassThrough, Readable } from "node:stream"; // instead of using node, defer to
 
 import type { AddEventListenerOptions, EventListener, RemoveEventListenerOptions } from "./event-listener-types";
 import { joinStreams } from "./join-streams";
-import { isNodeStream, isWebStream } from "./stream-guards";
 import type {
   DownloadRequest,
   DownloadResponse,
@@ -233,8 +226,20 @@ export class S3TransferManager implements IS3TransferManager {
           transferOptions
         );
 
+        console.log("GET", { range });
+
         if (getObject.Body) {
           streams.push(getObject.Body);
+
+          // todo: acquire lock on webstreams in the same
+          // todo: synchronous frame as they are opened or else
+          // todo: the connection might be closed too early.
+          if (typeof (getObject.Body as ReadableStream).getReader === "function") {
+            const reader = (getObject.Body as any).getReader();
+            (getObject.Body as any).getReader = function () {
+              return reader;
+            };
+          }
         }
         this.assignMetadata(metadata, getObject);
 
