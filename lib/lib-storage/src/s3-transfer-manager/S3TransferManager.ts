@@ -5,7 +5,9 @@ import type {
   PutObjectCommandInput,
 } from "@aws-sdk/client-s3";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { StreamingBlobPayloadOutputTypes } from "@smithy/types";
+import { getChecksum } from "@aws-sdk/middleware-flexible-checksums/dist-types/getChecksum";
+import { ChecksumConstructor, StreamingBlobPayloadOutputTypes } from "@smithy/types";
+import { Checksum } from "@smithy/types";
 
 import type { AddEventListenerOptions, EventListener, RemoveEventListenerOptions } from "./event-listener-types";
 import { joinStreams } from "./join-streams";
@@ -36,11 +38,20 @@ export class S3TransferManager implements IS3TransferManager {
   private readonly eventListeners: TransferEventListeners;
 
   public constructor(config: S3TransferManagerConfig = {}) {
-    this.s3ClientInstance = config.s3ClientInstance ?? new S3Client({});
+    this.checksumValidationEnabled = config.checksumValidationEnabled ?? true;
+
+    const checksumMode = this.checksumValidationEnabled ? "WHEN_SUPPORTED" : "WHEN_REQUIRED";
+
+    this.s3ClientInstance =
+      config.s3ClientInstance ??
+      new S3Client({
+        requestChecksumCalculation: checksumMode,
+        responseChecksumValidation: checksumMode,
+      });
 
     this.targetPartSizeBytes = config.targetPartSizeBytes ?? S3TransferManager.DEFAULT_PART_SIZE;
     this.multipartUploadThresholdBytes = config.multipartUploadThresholdBytes ?? S3TransferManager.MIN_UPLOAD_THRESHOLD;
-    this.checksumValidationEnabled = config.checksumValidationEnabled ?? true;
+
     this.checksumAlgorithm = config.checksumAlgorithm ?? "CRC32";
     this.multipartDownloadType = config.multipartDownloadType ?? "PART";
     this.eventListeners = {
@@ -158,7 +169,6 @@ export class S3TransferManager implements IS3TransferManager {
         this.assignMetadata(metadata, initialPart);
 
         if (initialPart.PartsCount! > 1) {
-          // MPD entire object
           for (let part = 2; part <= initialPart.PartsCount!; part++) {
             const getObject = await this.s3ClientInstance.send(
               new GetObjectCommand({
@@ -173,19 +183,6 @@ export class S3TransferManager implements IS3TransferManager {
             }
             this.assignMetadata(metadata, getObject);
           }
-        } else {
-          // single object download
-          const getObject = await this.s3ClientInstance.send(
-            new GetObjectCommand({
-              ...request,
-            }),
-            transferOptions
-          );
-
-          if (getObject.Body) {
-            streams.push(getObject.Body);
-          }
-          this.assignMetadata(metadata, getObject);
         }
       } else {
         const getObject = await this.s3ClientInstance.send(
@@ -201,7 +198,6 @@ export class S3TransferManager implements IS3TransferManager {
         this.assignMetadata(metadata, getObject);
       }
     } else if (this.multipartDownloadType === "RANGE") {
-      // MPD entire object
       let left = 0;
       let right = S3TransferManager.MIN_PART_SIZE;
       let maxRange = Infinity;
@@ -225,8 +221,6 @@ export class S3TransferManager implements IS3TransferManager {
           }),
           transferOptions
         );
-
-        console.log("GET", { range });
 
         if (getObject.Body) {
           streams.push(getObject.Body);
@@ -319,6 +313,18 @@ export class S3TransferManager implements IS3TransferManager {
   private validateConfig(): void {
     if (this.targetPartSizeBytes < S3TransferManager.MIN_PART_SIZE) {
       throw new Error(`targetPartSizeBytes must be at least ${S3TransferManager.MIN_PART_SIZE} bytes`);
+    }
+
+    if (
+      this.checksumAlgorithm != "CRC32" &&
+      this.checksumAlgorithm != "CRC32C" &&
+      this.checksumAlgorithm != "CRC64NVME" &&
+      this.checksumAlgorithm != "SHA1" &&
+      this.checksumAlgorithm != "SHA256"
+    ) {
+      throw new Error(
+        `Invalid checksumAlgorithm. Must be one of the following: CRC32, CRC32C, CRC64NVME, SHA1, SHA256`
+      );
     }
   }
 }

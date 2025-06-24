@@ -326,8 +326,8 @@ export interface TransferCompleteEvent extends TransferEvent {
  * @public
  */
 export interface TransferEventListeners {
-  transferInitiated: EventListener<TransferEvent>[];
-  bytesTransferred: EventListener<TransferEvent>[];
-  transferComplete: EventListener<TransferCompleteEvent>[];
-  transferFailed: EventListener<TransferEvent>[];
+  transferInitiated?: EventListener<TransferEvent>[];
+  bytesTransferred?: EventListener<TransferEvent>[];
+  transferComplete?: EventListener<TransferCompleteEvent>[];
+  transferFailed?: EventListener<TransferEvent>[];
 }
