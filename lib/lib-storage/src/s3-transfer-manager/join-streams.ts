@@ -1,17 +1,13 @@
-import { DownloadRequest } from "@aws-sdk/lib-lib-storage/dist-types/s3-transfer-manager/types";
 import { StreamingBlobPayloadOutputTypes } from "@smithy/types";
 import { isBlob, isReadableStream, sdkStreamMixin } from "@smithy/util-stream";
-import { request } from "http";
 import { Readable } from "stream";
+
+import { JoinStreamIterationEvents } from "./types";
 
 // check all types. needs to join nodejs and browser together
 export function joinStreams(
   streams: StreamingBlobPayloadOutputTypes[],
-  transferInfo?: {
-    request: DownloadRequest;
-    dispatchEvent?: (event: Event) => boolean;
-    totalBytes?: number;
-  }
+  eventListeners?: JoinStreamIterationEvents
 ): StreamingBlobPayloadOutputTypes {
   // console.log("Is Readable Stream: ");
   // console.log(isReadableStream(streams[0]));
@@ -31,19 +27,16 @@ export function joinStreams(
   } else if (isBlob(streams[0])) {
     throw new Error("Blob not supported yet");
   } else {
-    return sdkStreamMixin(Readable.from(iterateStreams(streams, transferInfo)));
+    return sdkStreamMixin(Readable.from(iterateStreams(streams, eventListeners)));
   }
 }
 
 export async function* iterateStreams(
   streams: StreamingBlobPayloadOutputTypes[],
-  transferInfo?: {
-    request: DownloadRequest;
-    dispatchEvent?: (event: Event) => boolean;
-    totalBytes?: number;
-  }
+  eventListeners?: JoinStreamIterationEvents
 ): AsyncIterable<StreamingBlobPayloadOutputTypes, void, void> {
   let bytesTransferred = 0;
+  let index = 0;
   for (const stream of streams) {
     if (isReadableStream(stream)) {
       const reader = stream.getReader();
@@ -64,20 +57,14 @@ export async function* iterateStreams(
         const chunkSize = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
         bytesTransferred += chunkSize;
 
-        if (transferInfo?.request && transferInfo?.dispatchEvent) {
-          transferInfo.dispatchEvent(
-            Object.assign(new Event("bytesTransferred"), {
-              request: transferInfo.request,
-              snapshot: {
-                transferredBytes: bytesTransferred,
-                totalBytes: transferInfo.totalBytes,
-              },
-            })
-          );
-        }
+        eventListeners?.onBytes?.(bytesTransferred, index);
       }
     } else {
-      throw new Error("unhandled stream type", stream);
+      const failure = new Error(`unhandled stream type ${(stream as any)?.constructor?.name}`);
+      eventListeners?.onFailure?.(failure, index);
+      throw failure;
     }
+    index++;
   }
+  eventListeners?.onCompletion?.(bytesTransferred, index - 1);
 }

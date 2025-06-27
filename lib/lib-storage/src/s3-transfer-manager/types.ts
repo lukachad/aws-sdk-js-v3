@@ -331,3 +331,14 @@ export interface TransferEventListeners {
   transferComplete?: EventListener<TransferCompleteEvent>[];
   transferFailed?: EventListener<TransferEvent>[];
 }
+
+/**
+ * Event listener type.
+ *
+ * @public
+ */
+export interface JoinStreamIterationEvents {
+  onBytes?: (byteLength: number, index: number) => void;
+  onCompletion?: (byteLength: number, index: number) => void;
+  onFailure?: (error: unknown, index: number) => void;
+}
