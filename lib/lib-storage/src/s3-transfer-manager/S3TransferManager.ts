@@ -4,7 +4,7 @@ import type {
   GetObjectCommandInput,
   PutObjectCommandInput,
 } from "@aws-sdk/client-s3";
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getChecksum } from "@aws-sdk/middleware-flexible-checksums/dist-types/getChecksum";
 import { ChecksumConstructor, StreamingBlobPayloadOutputTypes } from "@smithy/types";
 import { Checksum } from "@smithy/types";
@@ -96,8 +96,20 @@ export class S3TransferManager implements IS3TransferManager {
   public dispatchEvent(event: Event & TransferEvent): boolean;
   public dispatchEvent(event: Event & TransferCompleteEvent): boolean;
   public dispatchEvent(event: Event): boolean;
-  public dispatchEvent(event: unknown): boolean {
-    throw new Error("Method not implemented.");
+  public dispatchEvent(event: any): boolean {
+    const eventType = event.type;
+    const listeners = this.eventListeners[eventType as keyof TransferEventListeners];
+
+    if (listeners) {
+      for (const callback of listeners) {
+        if (typeof callback === "function") {
+          callback(event);
+        } else {
+          callback.handleEvent(event);
+        }
+      }
+    }
+    return true;
   }
 
   public removeEventListener(
@@ -139,6 +151,7 @@ export class S3TransferManager implements IS3TransferManager {
 
     const partNumber = request.PartNumber;
     const range = request.Range;
+    let totalSize = 0;
 
     if (typeof partNumber === "number") {
       // single object download
@@ -149,11 +162,30 @@ export class S3TransferManager implements IS3TransferManager {
         transferOptions
       );
 
+      this.dispatchEvent(
+        Object.assign(new Event("transferInitiated"), {
+          request,
+          snapshot: {
+            transferredBytes: 0,
+          },
+        })
+      );
+
       if (getObject.Body) {
         streams.push(getObject.Body);
       }
       this.assignMetadata(metadata, getObject);
     } else if (this.multipartDownloadType === "PART") {
+      const headObject = await this.s3ClientInstance.send(
+        new HeadObjectCommand({
+          Bucket: request.Bucket,
+          Key: request.Key,
+        }),
+        transferOptions
+      );
+
+      totalSize = headObject.ContentLength ?? 0;
+
       if (range == null) {
         const initialPart = await this.s3ClientInstance.send(
           new GetObjectCommand({
@@ -161,6 +193,15 @@ export class S3TransferManager implements IS3TransferManager {
             PartNumber: 1,
           }),
           transferOptions
+        );
+
+        this.dispatchEvent(
+          Object.assign(new Event("transferInitiated"), {
+            request,
+            snapshot: {
+              transferredBytes: 0,
+            },
+          })
         );
 
         if (initialPart.Body) {
@@ -192,6 +233,15 @@ export class S3TransferManager implements IS3TransferManager {
           transferOptions
         );
 
+        this.dispatchEvent(
+          Object.assign(new Event("transferInitiated"), {
+            request,
+            snapshot: {
+              transferredBytes: 0,
+            },
+          })
+        );
+
         if (getObject.Body) {
           streams.push(getObject.Body);
         }
@@ -202,6 +252,16 @@ export class S3TransferManager implements IS3TransferManager {
       let right = S3TransferManager.MIN_PART_SIZE;
       let maxRange = Infinity;
 
+      const headObject = await this.s3ClientInstance.send(
+        new HeadObjectCommand({
+          Bucket: request.Bucket,
+          Key: request.Key,
+        }),
+        transferOptions
+      );
+
+      totalSize = headObject.ContentLength ?? 0;
+
       if (range != null) {
         const [userRangeLeft, userRangeRight] = range.replace("bytes=", "").split("-").map(Number);
 
@@ -211,6 +271,16 @@ export class S3TransferManager implements IS3TransferManager {
       }
 
       let remainingLength = 1;
+
+      // Find better place for this
+      this.dispatchEvent(
+        Object.assign(new Event("transferInitiated"), {
+          request,
+          snapshot: {
+            transferredBytes: 0,
+          },
+        })
+      );
 
       while (remainingLength > 0) {
         const range = `bytes=${left}-${right}`;
@@ -248,7 +318,11 @@ export class S3TransferManager implements IS3TransferManager {
     }
     return {
       ...metadata,
-      Body: joinStreams(streams),
+      Body: joinStreams(streams, {
+        request,
+        dispatchEvent: this.dispatchEvent.bind(this),
+        totalBytes: totalSize,
+      }),
     };
   }
 
@@ -326,5 +400,11 @@ export class S3TransferManager implements IS3TransferManager {
         `Invalid checksumAlgorithm. Must be one of the following: CRC32, CRC32C, CRC64NVME, SHA1, SHA256`
       );
     }
+  }
+
+  private objectSnapshot(): {
+    transferEvent: TransferEvent;
+  } {
+    throw new Error("not implemented");
   }
 }
