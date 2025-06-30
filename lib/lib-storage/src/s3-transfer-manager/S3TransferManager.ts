@@ -89,8 +89,21 @@ export class S3TransferManager implements IS3TransferManager {
     callback: EventListener | null,
     options?: AddEventListenerOptions | boolean
   ): void;
-  public addEventListener(type: unknown, callback: unknown, options?: unknown): void {
-    throw new Error("Method not implemented.");
+  public addEventListener(type: unknown, callback: unknown, options?: AddEventListenerOptions | boolean): void {
+    const eventType = type as keyof TransferEventListeners;
+    const listeners = this.eventListeners[eventType];
+
+    if (listeners) {
+      if (eventType === "transferInitiated" || eventType === "bytesTransferred" || eventType === "transferFailed") {
+        const eventListener = callback as EventListener<TransferEvent>;
+        listeners.push(eventListener);
+      } else if (eventType === "transferComplete") {
+        const eventListener = callback as EventListener<TransferCompleteEvent>;
+        (listeners as EventListener<TransferCompleteEvent>[]).push(eventListener);
+      } else {
+        throw new Error(`Unknown event type: ${type}`);
+      }
+    }
   }
 
   public dispatchEvent(event: Event & TransferEvent): boolean;
@@ -138,7 +151,26 @@ export class S3TransferManager implements IS3TransferManager {
     options?: RemoveEventListenerOptions | boolean
   ): void;
   public removeEventListener(type: unknown, callback: unknown, options?: unknown): void {
-    throw new Error("Method not implemented.");
+    const eventType = type as keyof TransferEventListeners;
+    const listeners = this.eventListeners[eventType];
+
+    if (listeners) {
+      if (eventType === "transferInitiated" || eventType === "bytesTransferred" || eventType === "transferFailed") {
+        const eventListener = callback as EventListener<TransferEvent>;
+        const index = listeners.indexOf(eventListener);
+        if (index !== -1) {
+          listeners.splice(index, 1);
+        }
+      } else if (eventType === "transferComplete") {
+        const eventListener = callback as EventListener<TransferCompleteEvent>;
+        const index = (listeners as EventListener<TransferCompleteEvent>[]).indexOf(eventListener);
+        if (index !== -1) {
+          (listeners as EventListener<TransferCompleteEvent>[]).splice(index, 1);
+        }
+      } else {
+        throw new Error(`Unknown event type: ${type}`);
+      }
+    }
   }
 
   public upload(request: UploadRequest, transferOptions?: TransferOptions): Promise<UploadResponse> {
@@ -155,7 +187,6 @@ export class S3TransferManager implements IS3TransferManager {
     let totalSize = 0;
 
     if (typeof partNumber === "number") {
-      // single object download
       const getObjectRequest = {
         ...request,
       };
@@ -275,9 +306,10 @@ export class S3TransferManager implements IS3TransferManager {
           streams.push(getObject.Body);
           requests.push(getObjectRequest);
 
-          // todo: acquire lock on webstreams in the same
-          // todo: synchronous frame as they are opened or else
-          // todo: the connection might be closed too early.
+          // todo after completing SEP requirements:
+          // - acquire lock on webstreams in the same
+          // -  synchronous frame as they are opened or else
+          // - the connection might be closed too early.
           if (typeof (getObject.Body as ReadableStream).getReader === "function") {
             const reader = (getObject.Body as any).getReader();
             (getObject.Body as any).getReader = function () {
@@ -302,7 +334,7 @@ export class S3TransferManager implements IS3TransferManager {
       onBytes: (byteLength: number, index) => {
         this.dispatchEvent(
           Object.assign(new Event("bytesTransferred"), {
-            requests: requests[index],
+            request: requests[index],
             snapshot: {
               transferredBytes: byteLength,
               totalBytes: totalSize,
@@ -313,7 +345,7 @@ export class S3TransferManager implements IS3TransferManager {
       onCompletion: (byteLength: number, index) => {
         this.dispatchEvent(
           Object.assign(new Event("transferComplete"), {
-            requests: requests[index],
+            request: requests[index],
             response: {
               ...metadata,
               Body: responseBody,
@@ -328,9 +360,9 @@ export class S3TransferManager implements IS3TransferManager {
       onFailure: (error: unknown, index) => {
         this.dispatchEvent(
           Object.assign(new Event("transferFailed"), {
-            requests: requests[index],
+            request: requests[index],
             snapshot: {
-              transferredBytes: 0,
+              transferredBytes: error,
               totalBytes: totalSize,
             },
           })
@@ -413,5 +445,24 @@ export class S3TransferManager implements IS3TransferManager {
       })
     );
     return true;
+  }
+
+  /**
+   * For debugging purposes
+   *
+   * @internal
+   */
+  private logCallbackCount(type: unknown): void {
+    const eventType = type as keyof TransferEventListeners;
+    const listeners = this.eventListeners[eventType];
+
+    console.log(`Callback count for ${eventType}: `);
+    let count = 0;
+    if (listeners) {
+      for (const callbacks of listeners) {
+        count++;
+      }
+    }
+    console.log(count);
   }
 }
