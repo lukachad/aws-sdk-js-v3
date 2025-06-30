@@ -17,7 +17,7 @@ export function joinStreams(
   } else if (isReadableStream(streams[0])) {
     const newReadableStream = new ReadableStream({
       async start(controller) {
-        for await (const chunk of iterateStreams(streams)) {
+        for await (const chunk of iterateStreams(streams, eventListeners)) {
           controller.enqueue(chunk);
         }
         controller.close();
@@ -39,16 +39,20 @@ export async function* iterateStreams(
   let index = 0;
   for (const stream of streams) {
     if (isReadableStream(stream)) {
-      const reader = stream.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        yield value;
-        bytesTransferred += value.byteLength;
-      }
-      reader.releaseLock();
+      // const reader = stream.getReader();
+      // while (true) {
+      //   const { done, value } = await reader.read();
+      //   if (done) {
+      //     break;
+      //   }
+      //   yield value;
+      //   bytesTransferred += value.byteLength;
+      // }
+      // reader.releaseLock();
+
+      const failure = new Error(`ReadableStreams not supported yet ${(stream as any)?.constructor?.name}`);
+      eventListeners?.onFailure?.(failure, index);
+      throw failure;
     } else if (isBlob(stream)) {
       throw new Error("Blob not supported yet");
     } else if (stream instanceof Readable) {
