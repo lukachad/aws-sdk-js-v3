@@ -235,6 +235,7 @@ export class S3TransferManager implements IS3TransferManager {
           PartNumber: 1,
         };
         const initialPart = await this.s3ClientInstance.send(new GetObjectCommand(initialPartRequest), transferOptions);
+        const initialETag = initialPart.ETag ?? undefined;
 
         this.dispatchTransferInitiatedEvent(request, totalSize);
 
@@ -249,6 +250,7 @@ export class S3TransferManager implements IS3TransferManager {
             const getObjectRequest = {
               ...request,
               PartNumber: part,
+              IfMatch: !request.VersionId ? initialETag : undefined,
             };
             const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
 
@@ -274,6 +276,7 @@ export class S3TransferManager implements IS3TransferManager {
         this.assignMetadata(metadata, getObject);
       }
     } else if (this.multipartDownloadType === "RANGE") {
+      let initialETag = undefined;
       const headObject = await this.s3ClientInstance.send(
         new HeadObjectCommand({
           Bucket: request.Bucket,
@@ -301,14 +304,16 @@ export class S3TransferManager implements IS3TransferManager {
 
       while (remainingLength > 0) {
         const range = `bytes=${left}-${right}`;
-        const getObjectRequest = {
+        const getObjectRequest: GetObjectCommandInput = {
           ...request,
           Range: range,
+          IfMatch: transferInitiatedEventDispatched && !request.VersionId ? initialETag : undefined,
         };
         const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
 
         if (!transferInitiatedEventDispatched) {
           this.dispatchTransferInitiatedEvent(request, totalSize);
+          initialETag = getObject.ETag ?? undefined;
           transferInitiatedEventDispatched = true;
         }
 
