@@ -93,6 +93,8 @@ export class S3TransferManager implements IS3TransferManager {
     const eventType = type as keyof TransferEventListeners;
     const listeners = this.eventListeners[eventType];
 
+    // add support for once? and signal?
+
     if (listeners) {
       if (eventType === "transferInitiated" || eventType === "bytesTransferred" || eventType === "transferFailed") {
         const eventListener = callback as EventListener<TransferEvent>;
@@ -186,6 +188,15 @@ export class S3TransferManager implements IS3TransferManager {
     const range = request.Range;
     let totalSize = 0;
 
+    // add event listeners at request level
+    if (transferOptions?.eventListeners) {
+      for await (const listeners of this.iterateListeners(transferOptions?.eventListeners)) {
+        for (const listener of listeners) {
+          this.addEventListener(listener.eventType, listener.callback as unknown as EventListener); // add a more type safe type assertion
+        }
+      }
+    }
+
     if (typeof partNumber === "number") {
       const getObjectRequest = {
         ...request,
@@ -226,7 +237,6 @@ export class S3TransferManager implements IS3TransferManager {
         const initialPart = await this.s3ClientInstance.send(new GetObjectCommand(initialPartRequest), transferOptions);
 
         this.dispatchTransferInitiatedEvent(request, totalSize);
-        console.log(`Initial Part Content Length: ${initialPart.ContentLength}`);
 
         if (initialPart.Body) {
           streams.push(initialPart.Body);
@@ -464,5 +474,21 @@ export class S3TransferManager implements IS3TransferManager {
       }
     }
     console.log(count);
+  }
+
+  private async *iterateListeners(eventListeners: TransferEventListeners) {
+    for (const eventType in eventListeners) {
+      const listeners = eventListeners[eventType as keyof TransferEventListeners];
+      if (listeners) {
+        for (const callback of listeners) {
+          yield [
+            {
+              eventType: eventType,
+              callback: callback,
+            },
+          ];
+        }
+      }
+    }
   }
 }
