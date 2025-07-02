@@ -9,9 +9,6 @@ export function joinStreams(
   streams: StreamingBlobPayloadOutputTypes[],
   eventListeners?: JoinStreamIterationEvents
 ): StreamingBlobPayloadOutputTypes {
-  // console.log("Is Readable Stream: ");
-  // console.log(isReadableStream(streams[0]));
-
   if (streams.length === 1) {
     return streams[0];
   } else if (isReadableStream(streams[0])) {
