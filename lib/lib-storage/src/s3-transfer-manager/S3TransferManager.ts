@@ -89,19 +89,36 @@ export class S3TransferManager implements IS3TransferManager {
     callback: EventListener | null,
     options?: AddEventListenerOptions | boolean
   ): void;
-  public addEventListener(type: unknown, callback: unknown, options?: AddEventListenerOptions | boolean): void {
+  public addEventListener(
+    type: unknown,
+    callback: EventListener<Event>,
+    options?: AddEventListenerOptions | boolean
+  ): void {
     const eventType = type as keyof TransferEventListeners;
     const listeners = this.eventListeners[eventType];
 
-    // add support for once? and signal?
+    // TODO: Add support for AbortSignal
+
+    const once = typeof options !== "boolean" && options?.once;
+    let updatedCallback = callback;
+    if (once) {
+      updatedCallback = (event: any) => {
+        if (typeof callback === "function") {
+          callback(event);
+        } else {
+          callback.handleEvent(event);
+        }
+        this.removeEventListener(eventType, updatedCallback);
+      };
+    }
 
     if (listeners) {
       if (eventType === "transferInitiated" || eventType === "bytesTransferred" || eventType === "transferFailed") {
-        const eventListener = callback as EventListener<TransferEvent>;
-        listeners.push(eventListener);
+        listeners.push(updatedCallback as EventListener<TransferEvent>);
       } else if (eventType === "transferComplete") {
-        const eventListener = callback as EventListener<TransferCompleteEvent>;
-        (listeners as EventListener<TransferCompleteEvent>[]).push(eventListener);
+        (listeners as EventListener<TransferCompleteEvent>[]).push(
+          updatedCallback as EventListener<TransferCompleteEvent>
+        );
       } else {
         throw new Error(`Unknown event type: ${type}`);
       }
@@ -186,15 +203,12 @@ export class S3TransferManager implements IS3TransferManager {
 
     const partNumber = request.PartNumber;
     const range = request.Range;
+    let totalSize: number | undefined;
 
-    // is this type definition this proper?
-    let totalSize: number | undefined = 0;
-
-    // add event listeners at request level
     if (transferOptions?.eventListeners) {
       for await (const listeners of this.iterateListeners(transferOptions?.eventListeners)) {
         for (const listener of listeners) {
-          this.addEventListener(listener.eventType, listener.callback as unknown as EventListener); // add a more type safe type assertion
+          this.addEventListener(listener.eventType, listener.callback as EventListener);
         }
       }
     }
@@ -247,7 +261,6 @@ export class S3TransferManager implements IS3TransferManager {
             const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
 
             if (getObject.ContentRange && initialPart.ContentRange) {
-              console.log("Validating Expected Ranges...");
               this.validateExpectedRanges(initialPart.ContentRange, getObject.ContentRange, part, totalSize!);
             }
 
@@ -310,7 +323,8 @@ export class S3TransferManager implements IS3TransferManager {
           streams.push(getObject.Body);
           requests.push(getObjectRequest);
 
-          // todo after completing SEP requirements:
+          // TODO:
+          // after completing SEP requirements:
           // - acquire lock on webstreams in the same
           // -  synchronous frame as they are opened or else
           // - the connection might be closed too early.
@@ -496,6 +510,5 @@ export class S3TransferManager implements IS3TransferManager {
     if (currentStart !== expectedStart || currentEnd !== expectedEnd) {
       throw new Error(`Expected range ${expectedStart}-${expectedEnd} but got ${currentStart}-${currentEnd}`);
     }
-    console.log("Validated Expected Ranges");
   }
 }
