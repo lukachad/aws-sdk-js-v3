@@ -4,7 +4,7 @@ import { Readable } from "stream";
 
 import { JoinStreamIterationEvents } from "./types";
 
-// check all types. needs to join nodejs and browser together
+// TODO: check all types. needs to join nodejs and browser together
 export function joinStreams(
   streams: StreamingBlobPayloadOutputTypes[],
   eventListeners?: JoinStreamIterationEvents

@@ -304,7 +304,7 @@ export type TransferProgressSnapshot = SingleObjectProgressSnapshot | DirectoryP
  *
  * @public
  */
-export interface TransferEvent {
+export interface TransferEvent extends Event {
   request: UploadRequest | DownloadRequest;
   snapshot: TransferProgressSnapshot;
 }
