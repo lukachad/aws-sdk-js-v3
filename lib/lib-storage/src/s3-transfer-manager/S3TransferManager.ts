@@ -186,7 +186,9 @@ export class S3TransferManager implements IS3TransferManager {
 
     const partNumber = request.PartNumber;
     const range = request.Range;
-    let totalSize = 0;
+
+    // is this type definition this proper?
+    let totalSize: number | undefined = 0;
 
     // add event listeners at request level
     if (transferOptions?.eventListeners) {
@@ -219,16 +221,6 @@ export class S3TransferManager implements IS3TransferManager {
       }
       this.assignMetadata(metadata, getObject);
     } else if (this.multipartDownloadType === "PART") {
-      const headObject = await this.s3ClientInstance.send(
-        new HeadObjectCommand({
-          Bucket: request.Bucket,
-          Key: request.Key,
-        }),
-        transferOptions
-      );
-
-      totalSize = headObject.ContentLength ?? 0;
-
       if (range == null) {
         const initialPartRequest = {
           ...request,
@@ -236,9 +228,9 @@ export class S3TransferManager implements IS3TransferManager {
         };
         const initialPart = await this.s3ClientInstance.send(new GetObjectCommand(initialPartRequest), transferOptions);
         const initialETag = initialPart.ETag ?? undefined;
+        totalSize = initialPart.ContentRange ? parseInt(initialPart.ContentRange.split("/")[1]) : undefined;
 
         this.dispatchTransferInitiatedEvent(request, totalSize);
-
         if (initialPart.Body) {
           streams.push(initialPart.Body);
           requests.push(initialPartRequest);
@@ -254,6 +246,11 @@ export class S3TransferManager implements IS3TransferManager {
             };
             const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
 
+            if (getObject.ContentRange && initialPart.ContentRange) {
+              console.log("Validating Expected Ranges...");
+              this.validateExpectedRanges(initialPart.ContentRange, getObject.ContentRange, part, totalSize!);
+            }
+
             if (getObject.Body) {
               streams.push(getObject.Body);
               requests.push(getObjectRequest);
@@ -266,9 +263,9 @@ export class S3TransferManager implements IS3TransferManager {
           ...request,
         };
         const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
+        totalSize = getObject.ContentRange ? parseInt(getObject.ContentRange.split("/")[1]) : undefined;
 
-        this.dispatchTransferInitiatedEvent(request, getObject.ContentLength);
-
+        this.dispatchTransferInitiatedEvent(request, totalSize);
         if (getObject.Body) {
           streams.push(getObject.Body);
           requests.push(getObjectRequest);
@@ -277,16 +274,6 @@ export class S3TransferManager implements IS3TransferManager {
       }
     } else if (this.multipartDownloadType === "RANGE") {
       let initialETag = undefined;
-      const headObject = await this.s3ClientInstance.send(
-        new HeadObjectCommand({
-          Bucket: request.Bucket,
-          Key: request.Key,
-        }),
-        transferOptions
-      );
-
-      totalSize = headObject.ContentLength ?? 0;
-
       let left = 0;
       let right = S3TransferManager.MIN_PART_SIZE;
       let maxRange = Infinity;
@@ -312,6 +299,8 @@ export class S3TransferManager implements IS3TransferManager {
         const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
 
         if (!transferInitiatedEventDispatched) {
+          totalSize = getObject.ContentRange ? parseInt(getObject.ContentRange.split("/")[1]) : undefined;
+
           this.dispatchTransferInitiatedEvent(request, totalSize);
           initialETag = getObject.ETag ?? undefined;
           transferInitiatedEventDispatched = true;
@@ -344,7 +333,6 @@ export class S3TransferManager implements IS3TransferManager {
       }
     }
 
-    // Create new array of same length of streams array, the requests of each stream
     const responseBody = joinStreams(streams, {
       onBytes: (byteLength: number, index) => {
         this.dispatchEvent(
@@ -495,5 +483,19 @@ export class S3TransferManager implements IS3TransferManager {
         }
       }
     }
+  }
+
+  private validateExpectedRanges(initialPart: string, proceedingPart: string, partNum: number, totalSize: number) {
+    const partSize = parseInt(initialPart.split("-")[1]) + 1;
+    const currentStart = parseInt(proceedingPart.split(" ")[1].split("-")[0]);
+    const currentEnd = parseInt(proceedingPart.split("-")[1]);
+
+    const expectedStart = partSize * (partNum - 1);
+    const expectedEnd = Math.min(partSize * partNum - 1, totalSize - 1);
+
+    if (currentStart !== expectedStart || currentEnd !== expectedEnd) {
+      throw new Error(`Expected range ${expectedStart}-${expectedEnd} but got ${currentStart}-${currentEnd}`);
+    }
+    console.log("Validated Expected Ranges");
   }
 }
