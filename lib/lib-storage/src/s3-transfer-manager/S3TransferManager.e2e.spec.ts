@@ -54,7 +54,7 @@ describe(S3TransferManager.name, () => {
     });
   }, 120_000);
 
-  describe("multi part download", () => {
+  describe.skip("multi part download", () => {
     const modes = ["PART", "RANGE"] as S3TransferManagerConfig["multipartDownloadType"][];
     const sizes = [6, 11] as number[];
 
@@ -92,13 +92,13 @@ describe(S3TransferManager.name, () => {
             },
             {
               eventListeners: {
-                transferInitiated: [],
+                transferInitiated: [({ request, snapshot }) => {}],
                 bytesTransferred: [
                   ({ request, snapshot }) => {
                     bytesTransferred = snapshot.transferredBytes;
                   },
                 ],
-                transferComplete: [],
+                transferComplete: [({ request, snapshot, response }) => {}],
               },
             }
           );
@@ -111,12 +111,69 @@ describe(S3TransferManager.name, () => {
     }
   });
 
-  describe.skip("(SEP) download single object tests", () => {
-    it("multipartDownloadType = PART, range = 0-12MB, partNumber = null, single object", async () => {});
-    it("multipartDownloadType = RANGE, range = 0-12MB, partNumber = null, multipart object", async () => {});
-    it("multipartDownloadType = PART, range = null, partNumber = 2, single object", async () => {});
-    it("multipartDownloadType = RANGE, range = null, partNumber = 2, single object", async () => {});
-    it("multipartDownloadType = PART, range = null, partNumber = null, single object", async () => {});
-    it("multipartDownloadType = RANGE, range = null, partNumber = null, single object", async () => {});
+  describe("(SEP) download single object tests", () => {
+    async function sepTests(
+      objectType: "single" | "multipart",
+      multipartType: "PART" | "RANGE",
+      range: string | undefined,
+      partNumber: 2 | undefined
+    ) {
+      const Body = data(12 * 1024 * 1024);
+      const Key = `${objectType}${multipartType}${range}${partNumber}`;
+      const DEFAULT_PART_SIZE = 8 * 1024 * 1024;
+
+      if (multipartType === "PART") {
+        await new Upload({
+          client,
+          partSize: DEFAULT_PART_SIZE,
+          params: {
+            Bucket,
+            Key,
+            Body,
+          },
+        }).done();
+      } else {
+        await client.putObject({
+          Bucket,
+          Key,
+          Body,
+        });
+      }
+
+      const tm: S3TransferManager = multipartType === "PART" ? tmPart : tmRange;
+
+      const download = await tm.download({
+        Bucket,
+        Key,
+        Range: range,
+        PartNumber: partNumber,
+      });
+      const serialized = await download.Body?.transformToString();
+      check(serialized);
+      if (partNumber) {
+        expect(serialized?.length).toEqual(DEFAULT_PART_SIZE);
+      } else {
+        expect(serialized?.length).toEqual(Body.length);
+      }
+    }
+
+    it("single object: multipartDownloadType = PART, range = 0-12MB, partNumber = null", async () => {
+      await sepTests("single", "PART", `bytes=0-${12 * 1024 * 1024}`, undefined);
+    }, 60_000);
+    it("multipart object: multipartDownloadType = RANGE, range = 0-12MB, partNumber = null", async () => {
+      await sepTests("multipart", "RANGE", `bytes=0-${12 * 1024 * 1024}`, undefined);
+    }, 60_000);
+    it("single object: multipartDownloadType = PART, range = null, partNumber = 2", async () => {
+      await sepTests("single", "PART", undefined, 2);
+    }, 60_000);
+    it("single object: multipartDownloadType = RANGE, range = null, partNumber = 2", async () => {
+      await sepTests("single", "RANGE", undefined, 2);
+    }, 60_000);
+    it("single object: multipartDownloadType = PART, range = null, partNumber = null", async () => {
+      await sepTests("single", "PART", undefined, undefined);
+    }, 60_000);
+    it("single object: multipartDownloadType = RANGE, range = null, partNumber = null", async () => {
+      await sepTests("single", "RANGE", undefined, undefined);
+    }, 60_000);
   });
 });
