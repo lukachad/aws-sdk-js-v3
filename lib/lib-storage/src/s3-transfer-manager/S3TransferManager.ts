@@ -213,9 +213,11 @@ export class S3TransferManager implements IS3TransferManager {
       }
     }
 
+    // TODO: Ensure download operation is treated as single object download when partNumber is provided regardless of multipartDownloadType setting
     if (typeof partNumber === "number") {
       const getObjectRequest = {
         ...request,
+        PartNumber: partNumber,
       };
       const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
 
@@ -302,6 +304,7 @@ export class S3TransferManager implements IS3TransferManager {
       let remainingLength = 1;
       let transferInitiatedEventDispatched = false;
 
+      // TODO: Validate ranges for if multipartDownloadType === "RANGE"
       while (remainingLength > 0) {
         const range = `bytes=${left}-${right}`;
         const getObjectRequest: GetObjectCommandInput = {
