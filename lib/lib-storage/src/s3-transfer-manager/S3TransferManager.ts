@@ -264,7 +264,7 @@ export class S3TransferManager implements IS3TransferManager {
             const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
 
             if (getObject.ContentRange && previousPart.ContentRange) {
-              this.validateExpectedRanges(previousPart.ContentRange, getObject.ContentRange, part, totalSize!);
+              this.validateExpectedRanges(previousPart.ContentRange, getObject.ContentRange, part);
             }
 
             if (getObject.Body) {
@@ -504,7 +504,7 @@ export class S3TransferManager implements IS3TransferManager {
     }
   }
 
-  private validateExpectedRanges(previousPart: string, currentPart: string, partNum: number, totalSize: number) {
+  private validateExpectedRanges(previousPart: string, currentPart: string, partNum: number) {
     const parseContentRange = (range: string) => {
       const match = range.match(/bytes (\d+)-(\d+)\/(\d+)/);
       if (!match) throw new Error(`Invalid ContentRange format: ${range}`);
@@ -515,14 +515,29 @@ export class S3TransferManager implements IS3TransferManager {
       };
     };
 
+    // TODO: throw error for incomplete download.
+    // Ex: final part and 8 bytes short should throw error -> "bytes 10485760-13631480/13631488"
+
     try {
       const previous = parseContentRange(previousPart);
       const current = parseContentRange(currentPart);
 
       const expectedStart = previous.end + 1;
+      const prevPartSize = previous.end - previous.start + 1;
+      const currPartSize = current.end - current.start + 1;
 
       if (current.start !== expectedStart) {
         throw new Error(`Expected part ${partNum} to start at ${expectedStart} but got ${current.start}`);
+      }
+
+      // console.log(currPartSize < prevPartSize);
+      // console.log(current.end !== current.total - 1);
+      if (currPartSize < prevPartSize && current.end !== current.total - 1) {
+        throw new Error(
+          `Final part did not cover total range of ${current.total}. Expected range of bytes ${current.start}-${
+            currPartSize - 1
+          }`
+        );
       }
     } catch (error) {
       throw new Error(`Range validation failed: ${error.message}`);
