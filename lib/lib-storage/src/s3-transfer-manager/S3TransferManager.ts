@@ -254,6 +254,7 @@ export class S3TransferManager implements IS3TransferManager {
         this.assignMetadata(metadata, initialPart);
 
         if (initialPart.PartsCount! > 1) {
+          let previousPart = initialPart;
           for (let part = 2; part <= initialPart.PartsCount!; part++) {
             const getObjectRequest = {
               ...request,
@@ -262,8 +263,8 @@ export class S3TransferManager implements IS3TransferManager {
             };
             const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
 
-            if (getObject.ContentRange && initialPart.ContentRange) {
-              this.validateExpectedRanges(initialPart.ContentRange, getObject.ContentRange, part, totalSize!);
+            if (getObject.ContentRange && previousPart.ContentRange) {
+              this.validateExpectedRanges(previousPart.ContentRange, getObject.ContentRange, part, totalSize!);
             }
 
             if (getObject.Body) {
@@ -271,6 +272,7 @@ export class S3TransferManager implements IS3TransferManager {
               requests.push(getObjectRequest);
             }
             this.assignMetadata(metadata, getObject);
+            previousPart = getObject;
           }
         }
       } else {
@@ -502,16 +504,28 @@ export class S3TransferManager implements IS3TransferManager {
     }
   }
 
-  private validateExpectedRanges(initialPart: string, proceedingPart: string, partNum: number, totalSize: number) {
-    const partSize = parseInt(initialPart.split("-")[1]) + 1;
-    const currentStart = parseInt(proceedingPart.split(" ")[1].split("-")[0]);
-    const currentEnd = parseInt(proceedingPart.split("-")[1]);
+  private validateExpectedRanges(previousPart: string, currentPart: string, partNum: number, totalSize: number) {
+    const parseContentRange = (range: string) => {
+      const match = range.match(/bytes (\d+)-(\d+)\/(\d+)/);
+      if (!match) throw new Error(`Invalid ContentRange format: ${range}`);
+      return {
+        start: parseInt(match[1]),
+        end: parseInt(match[2]),
+        total: parseInt(match[3]),
+      };
+    };
 
-    const expectedStart = partSize * (partNum - 1);
-    const expectedEnd = Math.min(partSize * partNum - 1, totalSize - 1);
+    try {
+      const previous = parseContentRange(previousPart);
+      const current = parseContentRange(currentPart);
 
-    if (currentStart !== expectedStart || currentEnd !== expectedEnd) {
-      throw new Error(`Expected range ${expectedStart}-${expectedEnd} but got ${currentStart}-${currentEnd}`);
+      const expectedStart = previous.end + 1;
+
+      if (current.start !== expectedStart) {
+        throw new Error(`Expected part ${partNum} to start at ${expectedStart} but got ${current.start}`);
+      }
+    } catch (error) {
+      throw new Error(`Range validation failed: ${error.message}`);
     }
   }
 }
