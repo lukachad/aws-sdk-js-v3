@@ -442,18 +442,6 @@ export class S3TransferManager implements IS3TransferManager {
     if (this.targetPartSizeBytes < S3TransferManager.MIN_PART_SIZE) {
       throw new Error(`targetPartSizeBytes must be at least ${S3TransferManager.MIN_PART_SIZE} bytes`);
     }
-
-    if (
-      this.checksumAlgorithm != "CRC32" &&
-      this.checksumAlgorithm != "CRC32C" &&
-      this.checksumAlgorithm != "CRC64NVME" &&
-      this.checksumAlgorithm != "SHA1" &&
-      this.checksumAlgorithm != "SHA256"
-    ) {
-      throw new Error(
-        `Invalid checksumAlgorithm. Must be one of the following: CRC32, CRC32C, CRC64NVME, SHA1, SHA256`
-      );
-    }
   }
 
   private dispatchTransferInitiatedEvent(request: DownloadRequest | UploadRequest, totalSize?: number): boolean {
