@@ -11,6 +11,8 @@ import { S3TransferManager } from "./S3TransferManager";
  * - removeEventListener()
  * - TM Constructor
  * - *iterateListeners()
+ * - joinStreams()
+ * - iterateStreams()
  * - validateExpectedRanges()
  */
 
@@ -114,7 +116,7 @@ describe("S3TransferManager Unit Tests", () => {
       });
     });
 
-    describe("addEventListener", () => {
+    describe("addEventListener()", () => {
       it("Should register callbacks for all supported event types", () => {
         tm.addEventListener("transferInitiated", initiated);
         tm.addEventListener("bytesTransferred", transferring);
@@ -206,7 +208,7 @@ describe("S3TransferManager Unit Tests", () => {
       });
     });
 
-    describe("dispatchEvent", () => {
+    describe("dispatchEvent()", () => {
       it("Should dispatch an event", () => {
         const mockCallback = vi.fn();
         tm.addEventListener("bytesTransferred", mockCallback);
@@ -259,9 +261,73 @@ describe("S3TransferManager Unit Tests", () => {
         expect(mockCallback).toHaveBeenCalledWith(event);
         expect(result).toBe(true);
       });
+
+      it("Should call listeners in the order they were added", () => {
+        const callOrder: number[] = [];
+        const mockCallback1 = vi.fn(() => callOrder.push(1));
+        const mockCallback2 = vi.fn(() => callOrder.push(2));
+        const mockCallback3 = vi.fn(() => callOrder.push(3));
+
+        tm.addEventListener("transferInitiated", mockCallback1);
+        tm.addEventListener("transferInitiated", mockCallback2);
+        tm.addEventListener("transferInitiated", mockCallback3);
+
+        const event = Object.assign(new Event("transferInitiated"), {
+          request: {},
+          snapshot: {},
+        });
+
+        tm.dispatchEvent(event);
+
+        expect(callOrder).toEqual([1, 2, 3]);
+      });
+
+      it("Should handle object-style callbacks with handleEvent method", () => {
+        const mockCallback = vi.fn();
+        const objectCallback = {
+          handleEvent: mockCallback,
+        };
+        tm.addEventListener("transferInitiated", objectCallback as any);
+
+        const event = Object.assign(new Event("transferInitiated"), {
+          request: {},
+          snapshot: {},
+        });
+
+        tm.dispatchEvent(event);
+
+        expect(mockCallback).toHaveBeenCalledTimes(1);
+        expect(mockCallback).toHaveBeenCalledWith(event);
+      });
+
+      it("Should handle events with no registered listeners", () => {
+        const event = Object.assign(new Event("transferInitiated"), {
+          request: {},
+          snapshot: {},
+        });
+        const result = tm.dispatchEvent(event);
+
+        expect(result).toBe(true);
+      });
+
+      it("Should handle unknown event types", () => {});
+
+      it("Should handle a mix of object-style callbacks and functions", () => {});
     });
 
-    describe.skip("removeEventListener", () => {});
+    describe.skip("removeEventListener()", () => {
+      it("Should remove a listener from an event", () => {});
+
+      it("Should remove a listener from an event", () => {});
+
+      it("Should remove a listener from an event", () => {});
+    });
+
+    describe.skip("iterateListeners()", () => {});
+
+    describe.skip("joinStreams()", () => {});
+
+    describe.skip("iterateStreams()", () => {});
   });
 
   describe("validateExpectedRanges()", () => {
