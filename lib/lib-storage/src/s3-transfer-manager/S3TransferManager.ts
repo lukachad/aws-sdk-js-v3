@@ -97,6 +97,10 @@ export class S3TransferManager implements IS3TransferManager {
     const eventType = type as keyof TransferEventListeners;
     const listeners = this.eventListeners[eventType];
 
+    if (!listeners) {
+      throw new Error(`Unknown event type: ${eventType}`);
+    }
+
     // TODO: Add support for AbortSignal
 
     const once = typeof options !== "boolean" && options?.once;
@@ -112,16 +116,12 @@ export class S3TransferManager implements IS3TransferManager {
       };
     }
 
-    if (listeners) {
-      if (eventType === "transferInitiated" || eventType === "bytesTransferred" || eventType === "transferFailed") {
-        listeners.push(updatedCallback as EventListener<TransferEvent>);
-      } else if (eventType === "transferComplete") {
-        (listeners as EventListener<TransferCompleteEvent>[]).push(
-          updatedCallback as EventListener<TransferCompleteEvent>
-        );
-      } else {
-        throw new Error(`Unknown event type: ${type}`);
-      }
+    if (eventType === "transferInitiated" || eventType === "bytesTransferred" || eventType === "transferFailed") {
+      listeners.push(updatedCallback as EventListener<TransferEvent>);
+    } else if (eventType === "transferComplete") {
+      (listeners as EventListener<TransferCompleteEvent>[]).push(
+        updatedCallback as EventListener<TransferCompleteEvent>
+      );
     }
   }
 
