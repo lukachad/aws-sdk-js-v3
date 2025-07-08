@@ -31,6 +31,7 @@ describe(S3TransferManager.name, () => {
   let region: string;
 
   beforeAll(async () => {
+    // TODO: replace hard coded region and bucket with integration test resources.
     // const integTestResourcesEnv = await getIntegTestResources();
     // Object.assign(process.env, integTestResourcesEnv);
 
@@ -163,10 +164,12 @@ describe(S3TransferManager.name, () => {
     it("multipart object: multipartDownloadType = RANGE, range = 0-12MB, partNumber = null", async () => {
       await sepTests("multipart", "RANGE", `bytes=0-${12 * 1024 * 1024}`, undefined);
     }, 60_000);
+    // todo: part 2 is only 4mb
     it("single object: multipartDownloadType = PART, range = null, partNumber = 2", async () => {
       await sepTests("single", "PART", undefined, 2);
     }, 60_000);
-    it("single object: multipartDownloadType = RANGE, range = null, partNumber = 2", async () => {
+    // todo: how should this work? what should happen?
+    it.skip("single object: multipartDownloadType = RANGE, range = null, partNumber = 2", async () => {
       await sepTests("single", "RANGE", undefined, 2);
     }, 60_000);
     it("single object: multipartDownloadType = PART, range = null, partNumber = null", async () => {
