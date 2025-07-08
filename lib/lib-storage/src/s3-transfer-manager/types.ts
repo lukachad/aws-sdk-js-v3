@@ -216,7 +216,7 @@ export interface IS3TransferManager {
     callback: EventListener<TransferEvent>,
     options?: AddEventListenerOptions | boolean
   ): void;
-  addEventListener(type: string, callback: EventListener | null, options?: AddEventListenerOptions | boolean): void;
+  addEventListener(type: string, callback: EventListener, options?: AddEventListenerOptions | boolean): void;
 
   /**
    * Dispatches an event to the registered event listeners.
@@ -261,11 +261,7 @@ export interface IS3TransferManager {
     callback: EventListener<TransferEvent>,
     options?: RemoveEventListenerOptions | boolean
   ): void;
-  removeEventListener(
-    type: string,
-    callback: EventListener | null,
-    options?: RemoveEventListenerOptions | boolean
-  ): void;
+  removeEventListener(type: string, callback: EventListener, options?: RemoveEventListenerOptions | boolean): void;
 }
 
 /**

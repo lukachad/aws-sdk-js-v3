@@ -84,16 +84,8 @@ export class S3TransferManager implements IS3TransferManager {
     callback: EventListener<TransferEvent>,
     options?: AddEventListenerOptions | boolean
   ): void;
-  public addEventListener(
-    type: string,
-    callback: EventListener | null,
-    options?: AddEventListenerOptions | boolean
-  ): void;
-  public addEventListener(
-    type: unknown,
-    callback: EventListener<Event>,
-    options?: AddEventListenerOptions | boolean
-  ): void {
+  public addEventListener(type: string, callback: EventListener, options?: AddEventListenerOptions | boolean): void;
+  public addEventListener(type: string, callback: EventListener, options?: AddEventListenerOptions | boolean): void {
     const eventType = type as keyof TransferEventListeners;
     const listeners = this.eventListeners[eventType];
 
@@ -105,8 +97,9 @@ export class S3TransferManager implements IS3TransferManager {
 
     const once = typeof options !== "boolean" && options?.once;
     let updatedCallback = callback;
+
     if (once) {
-      updatedCallback = (event: any) => {
+      updatedCallback = (event: Event) => {
         if (typeof callback === "function") {
           callback(event);
         } else {
@@ -116,28 +109,25 @@ export class S3TransferManager implements IS3TransferManager {
       };
     }
 
-    if (eventType === "transferInitiated" || eventType === "bytesTransferred" || eventType === "transferFailed") {
-      listeners.push(updatedCallback as EventListener<TransferEvent>);
-    } else if (eventType === "transferComplete") {
-      (listeners as EventListener<TransferCompleteEvent>[]).push(
-        updatedCallback as EventListener<TransferCompleteEvent>
-      );
-    }
+    listeners.push(updatedCallback);
   }
 
+  /**
+   * todo: what does the return boolean mean?
+   */
   public dispatchEvent(event: Event & TransferEvent): boolean;
   public dispatchEvent(event: Event & TransferCompleteEvent): boolean;
   public dispatchEvent(event: Event): boolean;
-  public dispatchEvent(event: any): boolean {
+  public dispatchEvent(event: Event): boolean {
     const eventType = event.type;
-    const listeners = this.eventListeners[eventType as keyof TransferEventListeners];
+    const listeners = this.eventListeners[eventType as keyof TransferEventListeners] as EventListener[];
 
     if (listeners) {
-      for (const callback of listeners) {
-        if (typeof callback === "function") {
-          callback(event);
+      for (const listener of listeners) {
+        if (typeof listener === "function") {
+          listener(event);
         } else {
-          callback.handleEvent?.(event);
+          listener.handleEvent(event);
         }
       }
     }
@@ -166,25 +156,28 @@ export class S3TransferManager implements IS3TransferManager {
   ): void;
   public removeEventListener(
     type: string,
-    callback: EventListener | null,
+    callback: EventListener,
     options?: RemoveEventListenerOptions | boolean
   ): void;
-  public removeEventListener(type: unknown, callback: unknown, options?: unknown): void {
+  public removeEventListener(
+    type: string,
+    callback: EventListener,
+    options?: RemoveEventListenerOptions | boolean
+  ): void {
     const eventType = type as keyof TransferEventListeners;
     const listeners = this.eventListeners[eventType];
 
     if (listeners) {
-      if (eventType === "transferInitiated" || eventType === "bytesTransferred" || eventType === "transferFailed") {
+      if (
+        eventType === "transferInitiated" ||
+        eventType === "bytesTransferred" ||
+        eventType === "transferFailed" ||
+        eventType === "transferComplete"
+      ) {
         const eventListener = callback as EventListener<TransferEvent>;
         const index = listeners.indexOf(eventListener);
         if (index !== -1) {
           listeners.splice(index, 1);
-        }
-      } else if (eventType === "transferComplete") {
-        const eventListener = callback as EventListener<TransferCompleteEvent>;
-        const index = (listeners as EventListener<TransferCompleteEvent>[]).indexOf(eventListener);
-        if (index !== -1) {
-          (listeners as EventListener<TransferCompleteEvent>[]).splice(index, 1);
         }
       } else {
         throw new Error(`Unknown event type: ${type}`);
@@ -205,8 +198,11 @@ export class S3TransferManager implements IS3TransferManager {
     const range = request.Range;
     let totalSize: number | undefined;
 
+    // todo: save a reference to each of the download-scoped listeners
+    // todo: remove them at the end of the download.
+
     if (transferOptions?.eventListeners) {
-      for await (const listeners of this.iterateListeners(transferOptions?.eventListeners)) {
+      for (const listeners of this.iterateListeners(transferOptions?.eventListeners)) {
         for (const listener of listeners) {
           this.addEventListener(listener.eventType, listener.callback as EventListener);
         }
@@ -352,49 +348,56 @@ export class S3TransferManager implements IS3TransferManager {
       }
     }
 
-    const responseBody = joinStreams(streams, {
-      onBytes: (byteLength: number, index) => {
-        this.dispatchEvent(
-          Object.assign(new Event("bytesTransferred"), {
-            request: requests[index],
-            snapshot: {
-              transferredBytes: byteLength,
-              totalBytes: totalSize,
-            },
-          })
-        );
-      },
-      onCompletion: (byteLength: number, index) => {
-        this.dispatchEvent(
-          Object.assign(new Event("transferComplete"), {
-            request: requests[index],
-            response: {
-              ...metadata,
-              Body: responseBody,
-            },
-            snapshot: {
-              transferredBytes: byteLength,
-              totalBytes: totalSize,
-            },
-          })
-        );
-      },
-      onFailure: (error: unknown, index) => {
-        this.dispatchEvent(
-          Object.assign(new Event("transferFailed"), {
-            request: requests[index],
-            snapshot: {
-              transferredBytes: error,
-              totalBytes: totalSize,
-            },
-          })
-        );
-      },
-    });
+    const removeLocalEventListeners = () => {
+      if (transferOptions?.eventListeners) {
+        for (const listeners of this.iterateListeners(transferOptions?.eventListeners)) {
+          for (const listener of listeners) {
+            this.removeEventListener(listener.eventType, listener.callback as EventListener);
+          }
+        }
+      }
+    };
 
     const response = {
       ...metadata,
-      Body: responseBody,
+      Body: joinStreams(streams, {
+        onBytes: (byteLength: number, index) => {
+          this.dispatchEvent(
+            Object.assign(new Event("bytesTransferred"), {
+              request: requests[index],
+              snapshot: {
+                transferredBytes: byteLength,
+                totalBytes: totalSize,
+              },
+            })
+          );
+        },
+        onCompletion: (byteLength: number, index) => {
+          this.dispatchEvent(
+            Object.assign(new Event("transferComplete"), {
+              request: requests[index],
+              response,
+              snapshot: {
+                transferredBytes: byteLength,
+                totalBytes: totalSize,
+              },
+            })
+          );
+          removeLocalEventListeners();
+        },
+        onFailure: (error: unknown, index) => {
+          this.dispatchEvent(
+            Object.assign(new Event("transferFailed"), {
+              request: requests[index],
+              snapshot: {
+                transferredBytes: error,
+                totalBytes: totalSize,
+              },
+            })
+          );
+          removeLocalEventListeners();
+        },
+      }),
     };
 
     return response;
@@ -476,8 +479,9 @@ export class S3TransferManager implements IS3TransferManager {
     console.log(count);
   }
 
-  private async *iterateListeners(eventListeners: TransferEventListeners) {
-    for (const eventType in eventListeners) {
+  private *iterateListeners(eventListeners: TransferEventListeners) {
+    for (const key in eventListeners) {
+      const eventType = key as keyof TransferEventListeners;
       const listeners = eventListeners[eventType as keyof TransferEventListeners];
       if (listeners) {
         for (const callback of listeners) {
