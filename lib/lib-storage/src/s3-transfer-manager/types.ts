@@ -223,7 +223,7 @@ export interface IS3TransferManager {
    * Triggers callbacks registered via addEventListener with matching event types.
    *
    * @param event - The event object to dispatch.
-   * @returns whether the event dispatched successfully
+   * @returns whether the event ran to completion
    *
    * @public
    */

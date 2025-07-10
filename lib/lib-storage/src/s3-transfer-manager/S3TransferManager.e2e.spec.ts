@@ -152,7 +152,7 @@ describe(S3TransferManager.name, () => {
       const serialized = await download.Body?.transformToString();
       check(serialized);
       if (partNumber) {
-        expect(serialized?.length).toEqual(DEFAULT_PART_SIZE);
+        expect(serialized?.length).toEqual(4 * 1024 * 1024); // Part 1 is 8MB Part 2 is 4MB
       } else {
         expect(serialized?.length).toEqual(Body.length);
       }

@@ -198,6 +198,8 @@ export class S3TransferManager implements IS3TransferManager {
     const range = request.Range;
     let totalSize: number | undefined;
 
+    this.checkAborted(transferOptions);
+
     // todo: save a reference to each of the download-scoped listeners
     // todo: remove them at the end of the download.
 
@@ -209,8 +211,9 @@ export class S3TransferManager implements IS3TransferManager {
       }
     }
 
-    // TODO: Ensure download operation is treated as single object download when partNumber is provided regardless of multipartDownloadType setting
     if (typeof partNumber === "number") {
+      this.checkAborted(transferOptions);
+
       const getObjectRequest = {
         ...request,
         PartNumber: partNumber,
@@ -233,6 +236,8 @@ export class S3TransferManager implements IS3TransferManager {
       }
       this.assignMetadata(metadata, getObject);
     } else if (this.multipartDownloadType === "PART") {
+      this.checkAborted(transferOptions);
+
       if (range == null) {
         const initialPartRequest = {
           ...request,
@@ -252,6 +257,8 @@ export class S3TransferManager implements IS3TransferManager {
         if (initialPart.PartsCount! > 1) {
           let previousPart = initialPart;
           for (let part = 2; part <= initialPart.PartsCount!; part++) {
+            this.checkAborted(transferOptions);
+
             const getObjectRequest = {
               ...request,
               PartNumber: part,
@@ -272,6 +279,8 @@ export class S3TransferManager implements IS3TransferManager {
           }
         }
       } else {
+        this.checkAborted(transferOptions);
+
         const getObjectRequest = {
           ...request,
         };
@@ -286,6 +295,8 @@ export class S3TransferManager implements IS3TransferManager {
         this.assignMetadata(metadata, getObject);
       }
     } else if (this.multipartDownloadType === "RANGE") {
+      this.checkAborted(transferOptions);
+
       let initialETag = undefined;
       let left = 0;
       let right = S3TransferManager.MIN_PART_SIZE;
@@ -304,6 +315,8 @@ export class S3TransferManager implements IS3TransferManager {
 
       // TODO: Validate ranges for if multipartDownloadType === "RANGE"
       while (remainingLength > 0) {
+        this.checkAborted(transferOptions);
+
         const range = `bytes=${left}-${right}`;
         const getObjectRequest: GetObjectCommandInput = {
           ...request,
@@ -432,6 +445,12 @@ export class S3TransferManager implements IS3TransferManager {
     throw new Error("Method not implemented.");
   }
 
+  private checkAborted(transferOptions?: TransferOptions): void {
+    if (transferOptions?.abortSignal?.aborted) {
+      throw Object.assign(new Error("Download aborted."), { name: "AbortError" });
+    }
+  }
+
   private assignMetadata(container: any, response: any) {
     for (const key in response) {
       if (key === "Body") {
@@ -507,9 +526,6 @@ export class S3TransferManager implements IS3TransferManager {
       };
     };
 
-    // TODO: throw error for incomplete download.
-    // Ex: final part and 8 bytes short should throw error -> "bytes 10485760-13631480/13631488"
-
     try {
       const previous = parseContentRange(previousPart);
       const current = parseContentRange(currentPart);
@@ -522,8 +538,6 @@ export class S3TransferManager implements IS3TransferManager {
         throw new Error(`Expected part ${partNum} to start at ${expectedStart} but got ${current.start}`);
       }
 
-      // console.log(currPartSize < prevPartSize);
-      // console.log(current.end !== current.total - 1);
       if (currPartSize < prevPartSize && current.end !== current.total - 1) {
         throw new Error(
           `Final part did not cover total range of ${current.total}. Expected range of bytes ${current.start}-${
