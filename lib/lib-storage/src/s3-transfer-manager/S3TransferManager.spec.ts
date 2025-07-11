@@ -336,15 +336,67 @@ describe("S3TransferManager Unit Tests", () => {
         expect(result).toBe(true);
       });
 
-      it("Should handle unknown event types", () => {});
+      it("Should handle unknown event types", () => {
+        const event = Object.assign(new Event("unknownEvent"), {
+          request: {},
+          snapshot: {},
+        });
 
-      it("Should handle a mix of object-style callbacks and functions", () => {});
+        const results = tm.dispatchEvent(event);
+        expect(results).toBe(true);
+      });
+
+      it("Should handle a mix of object-style callbacks and functions", () => {
+        const callback = vi.fn();
+        const objectCallback = {
+          handleEvent: vi.fn(),
+        };
+        tm.addEventListener("transferInitiated", objectCallback as any);
+        tm.addEventListener("transferInitiated", callback);
+
+        const event = Object.assign(new Event("transferInitiated"), {
+          request: {},
+          snapshot: {},
+        });
+
+        tm.dispatchEvent(event);
+
+        expect(objectCallback.handleEvent).toHaveBeenCalledTimes(1);
+        expect(objectCallback.handleEvent).toHaveBeenCalledWith(event);
+        expect(callback).toHaveBeenCalledTimes(1);
+        expect(callback).toHaveBeenCalledWith(event);
+      });
     });
 
-    describe.skip("removeEventListener()", () => {
-      it("Should remove a listener from an event", () => {});
+    describe("removeEventListener()", () => {
+      it("Should remove a listener from an event", () => {
+        const callback = vi.fn();
+        tm.addEventListener("transferInitiated", callback);
+        tm.removeEventListener("transferInitiated", callback);
 
-      it("Should remove a listener from an event", () => {});
+        const event = Object.assign(new Event("transferInitiated"), {
+          request: {},
+          snapshot: {},
+        });
+
+        tm.dispatchEvent(event);
+
+        expect(callback).not.toHaveBeenCalled();
+      });
+
+      it("Should handle removing from an event type with no listeners", () => {
+        const callback = vi.fn();
+        tm.removeEventListener("transferInitiated", callback);
+
+        const event = Object.assign(new Event("transferInitiated"), {
+          request: {},
+          snapshot: {},
+        });
+
+        tm.dispatchEvent(event);
+
+        expect(callback).not.toHaveBeenCalled();
+      });
 
       it("Should remove a listener from an event", () => {});
     });

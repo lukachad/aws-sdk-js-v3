@@ -229,29 +229,9 @@ export class S3TransferManager implements IS3TransferManager {
     }
 
     if (typeof partNumber === "number") {
-      this.checkAborted(transferOptions);
-
-      const getObjectRequest = {
-        ...request,
-        PartNumber: partNumber,
-      };
-      const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
-
-      this.dispatchEvent(
-        Object.assign(new Event("transferInitiated"), {
-          request,
-          snapshot: {
-            transferredBytes: 0,
-            totalBytes: getObject.ContentLength,
-          },
-        })
+      throw new Error(
+        "partNumber included: S3 Transfer Manager does not support downloads for specific parts. Use GetObjectCommand instead"
       );
-
-      if (getObject.Body) {
-        streams.push(getObject.Body);
-        requests.push(getObjectRequest);
-      }
-      this.assignMetadata(metadata, getObject);
     } else if (this.multipartDownloadType === "PART") {
       this.checkAborted(transferOptions);
 
