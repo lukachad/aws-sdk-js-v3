@@ -125,6 +125,12 @@ export class S3TransferManager implements IS3TransferManager {
 
   /**
    * todo: what does the return boolean mean?
+   *
+   * it returns false if the event is cancellable, and at least oneo the handlers which received event called
+   * Event.preventDefault(). Otherwise true.
+   * The use cases of preventDefault() does not apply to transfermanager but we should still keep  the boolean
+   * and continue to return true to stay consistent with EventTarget.
+   *
    */
   public dispatchEvent(event: Event & TransferEvent): boolean;
   public dispatchEvent(event: Event & TransferCompleteEvent): boolean;
