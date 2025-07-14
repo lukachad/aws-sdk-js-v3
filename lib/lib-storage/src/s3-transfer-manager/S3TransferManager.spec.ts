@@ -387,9 +387,44 @@ describe("S3TransferManager Unit Tests", () => {
     });
 
     describe("removeEventListener()", () => {
-      it("Should remove a listener from an event", () => {
+      it("Should remove only the specified listener, leaving other intact", () => {
+        const callback1 = vi.fn();
+        const callback2 = vi.fn();
+        tm.addEventListener("transferInitiated", callback1);
+        tm.addEventListener("transferInitiated", callback2);
+
+        tm.removeEventListener("transferInitiated", callback1);
+
+        const event = Object.assign(new Event("transferInitiated"), {
+          request: {},
+          snapshot: {},
+        });
+
+        tm.dispatchEvent(event);
+
+        expect(callback1).not.toHaveBeenCalled();
+        expect(callback2).toHaveBeenCalledTimes(1);
+      });
+
+      it("Should remove object-style callback with handleEvent", () => {
+        const objectCallback = { handleEvent: vi.fn() };
+        tm.addEventListener("transferInitiated", objectCallback as any);
+        tm.removeEventListener("transferInitiated", objectCallback as any);
+
+        const event = Object.assign(new Event("transferInitiated"), {
+          request: {},
+          snapshot: {},
+        });
+
+        tm.dispatchEvent(event);
+        expect(objectCallback.handleEvent).not.toHaveBeenCalled();
+      });
+
+      it("Should remove all instance of the same callback", () => {
         const callback = vi.fn();
         tm.addEventListener("transferInitiated", callback);
+        tm.addEventListener("transferInitiated", callback);
+
         tm.removeEventListener("transferInitiated", callback);
 
         const event = Object.assign(new Event("transferInitiated"), {
@@ -402,7 +437,14 @@ describe("S3TransferManager Unit Tests", () => {
         expect(callback).not.toHaveBeenCalled();
       });
 
-      it("Should handle removing from an event type with no listeners", () => {
+      it("Should handle removing non-existing listener gracefully", () => {
+        const callback = vi.fn();
+        expect(() => {
+          tm.removeEventListener("transferInitiated", callback);
+        }).not.toThrow();
+      });
+
+      it("Should handle removing from an event type with no listeners gracefully", () => {
         const callback = vi.fn();
         tm.removeEventListener("transferInitiated", callback);
 
@@ -416,10 +458,95 @@ describe("S3TransferManager Unit Tests", () => {
         expect(callback).not.toHaveBeenCalled();
       });
 
-      it("Should remove a listener from an event", () => {});
+      it("Should handle null callback parameter", () => {
+        expect(() => {
+          tm.removeEventListener("transferInitiated", null as any);
+        }).not.toThrow();
+      });
     });
 
-    describe.skip("iterateListeners()", () => {});
+    describe("iterateListeners()", () => {
+      it("Should iterate over all listeners given a TransferManager's object of event listeners", () => {
+        const callback1 = vi.fn();
+        const callback2 = vi.fn();
+        const callback3 = vi.fn();
+
+        const eventListeners = {
+          transferInitiated: [callback1],
+          bytesTransferred: [callback2, callback3],
+          transferComplete: [],
+          transferFailed: [],
+        };
+
+        const results = Array.from((tm as any).iterateListeners(eventListeners)) as any[];
+
+        expect(results).toHaveLength(3);
+        expect(results[0][0]).toEqual({ eventType: "transferInitiated", callback: callback1 });
+        expect(results[1][0]).toEqual({ eventType: "bytesTransferred", callback: callback2 });
+        expect(results[2][0]).toEqual({ eventType: "bytesTransferred", callback: callback3 });
+      });
+
+      it("Should handle empty event listeners object", () => {
+        const eventListeners = {
+          transferInitiated: [],
+          bytesTransferred: [],
+          transferComplete: [],
+          transferFailed: [],
+        };
+
+        const results = Array.from((tm as any).iterateListeners(eventListeners)) as any[];
+
+        expect(results).toHaveLength(0);
+      });
+
+      it("Should iterate over a mix of functions and objects with handleEvent callback types.", () => {
+        const callback1 = vi.fn();
+        const callback2 = vi.fn();
+        const objectCallback = {
+          handleEvent: vi.fn(),
+        };
+
+        const eventListeners = {
+          transferInitiated: [callback1],
+          bytesTransferred: [],
+          transferComplete: [],
+          transferFailed: [callback2, objectCallback],
+        };
+
+        const results = Array.from((tm as any).iterateListeners(eventListeners)) as any[];
+
+        expect(results).toHaveLength(3);
+        expect(results[0][0]).toEqual({ eventType: "transferInitiated", callback: callback1 });
+        expect(results[1][0]).toEqual({ eventType: "transferFailed", callback: callback2 });
+        expect(results[2][0]).toEqual({ eventType: "transferFailed", callback: objectCallback });
+      });
+
+      it("Should handle event lisetners with duplicate callbacks in the same event type", () => {
+        const callback = vi.fn();
+
+        const eventListeners = {
+          transferInitiated: [callback, callback],
+          bytesTransferred: [],
+          transferComplete: [callback, callback],
+          transferFailed: [],
+        };
+
+        const results = Array.from((tm as any).iterateListeners(eventListeners)) as any[];
+
+        expect(results).toHaveLength(4);
+        for (let i = 0; i < results.length; i++) {
+          expect(results[i][0]).toEqual({ eventType: results[i][0].eventType, callback });
+        }
+      });
+
+      it("Should return empty iterator when no callbacks are present", () => {
+        const eventListeners = {};
+
+        const results = Array.from((tm as any).iterateListeners(eventListeners)) as any[];
+
+        expect(results).toHaveLength(0);
+      });
+    });
 
     describe.skip("joinStreams()", () => {});
 
