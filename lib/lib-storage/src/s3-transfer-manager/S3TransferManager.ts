@@ -193,9 +193,10 @@ export class S3TransferManager implements IS3TransferManager {
         eventType === "transferComplete"
       ) {
         const eventListener = callback as EventListener<TransferEvent>;
-        const index = listeners.indexOf(eventListener);
-        if (index !== -1) {
+        let index = listeners.indexOf(eventListener);
+        while (index !== -1) {
           listeners.splice(index, 1);
+          index = listeners.indexOf(eventListener);
         }
       } else {
         throw new Error(`Unknown event type: ${type}`);
