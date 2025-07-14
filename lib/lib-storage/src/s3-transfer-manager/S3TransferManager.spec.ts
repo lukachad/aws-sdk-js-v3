@@ -175,7 +175,7 @@ describe("S3TransferManager Unit Tests", () => {
         }).toThrow("Unknown event type: invalidEvent");
       });
 
-      it("Should handle options.once correctly, running the ", () => {
+      it("Should handle options.once correctly, running the listener at most once.", () => {
         const mockCallback = vi.fn();
         tm.addEventListener("transferInitiated", mockCallback, { once: true });
 
@@ -214,6 +214,24 @@ describe("S3TransferManager Unit Tests", () => {
 
         controller.abort();
         expect((tm as any).eventListeners.transferInitiated).toEqual([]);
+      });
+
+      it("Should clean up abort listeners and store cleanup functions in WeakMap", () => {
+        const controller = new AbortController();
+        const callback = vi.fn();
+
+        tm.addEventListener("transferInitiated", callback, { signal: controller.signal });
+
+        expect((tm as any).eventListeners.transferInitiated).toEqual([callback]);
+        expect((tm as any).abortCleanupFunctions.has(controller.signal)).toBe(true);
+
+        const cleanupFn = (tm as any).abortCleanupFunctions.get(controller.signal);
+        cleanupFn();
+        (tm as any).abortCleanupFunctions.delete(controller.signal);
+
+        expect((tm as any).abortCleanupFunctions.has(controller.signal)).toBe(false);
+        controller.abort();
+        expect((tm as any).eventListeners.transferInitiated).toEqual([callback]);
       });
 
       it("Should handle boolean options parameter", () => {
