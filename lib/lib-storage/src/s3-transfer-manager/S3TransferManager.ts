@@ -36,6 +36,7 @@ export class S3TransferManager implements IS3TransferManager {
   private readonly checksumAlgorithm: ChecksumAlgorithm;
   private readonly multipartDownloadType: "PART" | "RANGE";
   private readonly eventListeners: TransferEventListeners;
+  private readonly abortCleanupFunctions = new WeakMap<AbortSignal, () => void>();
 
   public constructor(config: S3TransferManagerConfig = {}) {
     this.checksumValidationEnabled = config.checksumValidationEnabled ?? true;
@@ -100,14 +101,14 @@ export class S3TransferManager implements IS3TransferManager {
     if (signal?.aborted) {
       return;
     }
+
     if (signal) {
-      signal.addEventListener(
-        "abort",
-        () => {
-          this.removeEventListener(eventType, updatedCallback);
-        },
-        { once: true }
-      );
+      const removeListenerAfterAbort = () => {
+        this.removeEventListener(eventType, updatedCallback);
+      };
+
+      this.abortCleanupFunctions.set(signal, () => signal.removeEventListener("abort", removeListenerAfterAbort));
+      signal.addEventListener("abort", removeListenerAfterAbort, { once: true });
     }
 
     if (once) {
@@ -365,6 +366,12 @@ export class S3TransferManager implements IS3TransferManager {
             this.removeEventListener(listener.eventType, listener.callback as EventListener);
           }
         }
+      }
+
+      // remove any local abort() listeners after request completes.
+      if (transferOptions?.abortSignal) {
+        this.abortCleanupFunctions.get(transferOptions.abortSignal as AbortSignal)?.();
+        this.abortCleanupFunctions.delete(transferOptions.abortSignal as AbortSignal);
       }
     };
 
