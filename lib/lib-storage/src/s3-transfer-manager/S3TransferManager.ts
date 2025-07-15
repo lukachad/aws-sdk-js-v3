@@ -210,7 +210,7 @@ export class S3TransferManager implements IS3TransferManager {
 
   public async download(request: DownloadRequest, transferOptions?: TransferOptions): Promise<DownloadResponse> {
     const metadata = {} as Omit<DownloadResponse, "Body">;
-    const streams = [] as StreamingBlobPayloadOutputTypes[];
+    const streams = [] as Promise<StreamingBlobPayloadOutputTypes>[];
     const requests = [] as GetObjectCommandInput[];
 
     const partNumber = request.PartNumber;
@@ -248,13 +248,12 @@ export class S3TransferManager implements IS3TransferManager {
 
         this.dispatchTransferInitiatedEvent(request, totalSize);
         if (initialPart.Body) {
-          streams.push(initialPart.Body);
+          streams.push(Promise.resolve(initialPart.Body));
           requests.push(initialPartRequest);
         }
         this.assignMetadata(metadata, initialPart);
 
         if (initialPart.PartsCount! > 1) {
-          let previousPart = initialPart;
           for (let part = 2; part <= initialPart.PartsCount!; part++) {
             this.checkAborted(transferOptions);
 
@@ -263,18 +262,14 @@ export class S3TransferManager implements IS3TransferManager {
               PartNumber: part,
               IfMatch: !request.VersionId ? initialETag : undefined,
             };
-            const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
+            const getObject = this.s3ClientInstance
+              .send(new GetObjectCommand(getObjectRequest), transferOptions)
+              .then((response) => {
+                return response.Body!;
+              });
 
-            if (getObject.ContentRange && previousPart.ContentRange) {
-              this.validateExpectedRanges(previousPart.ContentRange, getObject.ContentRange, part);
-            }
-
-            if (getObject.Body) {
-              streams.push(getObject.Body);
-              requests.push(getObjectRequest);
-            }
-            this.assignMetadata(metadata, getObject);
-            previousPart = getObject;
+            streams.push(getObject);
+            requests.push(getObjectRequest);
           }
         }
       } else {
@@ -288,7 +283,7 @@ export class S3TransferManager implements IS3TransferManager {
 
         this.dispatchTransferInitiatedEvent(request, totalSize);
         if (getObject.Body) {
-          streams.push(getObject.Body);
+          streams.push(Promise.resolve(getObject.Body));
           requests.push(getObjectRequest);
         }
         this.assignMetadata(metadata, getObject);
@@ -300,6 +295,7 @@ export class S3TransferManager implements IS3TransferManager {
       let left = 0;
       let right = S3TransferManager.MIN_PART_SIZE;
       let maxRange = Infinity;
+      const range = `bytes=${left}-${right}`;
 
       if (range != null) {
         const [userRangeLeft, userRangeRight] = range.replace("bytes=", "").split("-").map(Number);
@@ -312,6 +308,25 @@ export class S3TransferManager implements IS3TransferManager {
       let remainingLength = 1;
       let transferInitiatedEventDispatched = false;
 
+      const getObjectRequest: GetObjectCommandInput = {
+        ...request,
+        Range: range,
+        IfMatch: transferInitiatedEventDispatched && !request.VersionId ? initialETag : undefined,
+      };
+      const initalRangeGet = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
+
+      streams.push(Promise.resolve(initalRangeGet.Body!));
+      requests.push(getObjectRequest);
+      this.assignMetadata(metadata, initalRangeGet);
+
+      left = right + 1;
+      right = Math.min(left + S3TransferManager.MIN_PART_SIZE, maxRange);
+
+      remainingLength = Math.min(
+        right - left,
+        Math.max(0, (initalRangeGet.ContentLength ?? 0) - S3TransferManager.MIN_PART_SIZE)
+      );
+
       // TODO: Validate ranges for if multipartDownloadType === "RANGE"
       while (remainingLength > 0) {
         this.checkAborted(transferOptions);
@@ -322,42 +337,43 @@ export class S3TransferManager implements IS3TransferManager {
           Range: range,
           IfMatch: transferInitiatedEventDispatched && !request.VersionId ? initialETag : undefined,
         };
-        const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
+        const getObject = this.s3ClientInstance
+          .send(new GetObjectCommand(getObjectRequest), transferOptions)
+          .then((response) => {
+            if (!transferInitiatedEventDispatched) {
+              totalSize = response.ContentRange ? parseInt(response.ContentRange.split("/")[1]) : undefined;
 
-        if (!transferInitiatedEventDispatched) {
-          totalSize = getObject.ContentRange ? parseInt(getObject.ContentRange.split("/")[1]) : undefined;
+              this.dispatchTransferInitiatedEvent(request, totalSize);
+              initialETag = response.ETag ?? undefined;
+              transferInitiatedEventDispatched = true;
+            }
+            return response.Body!;
+          });
 
-          this.dispatchTransferInitiatedEvent(request, totalSize);
-          initialETag = getObject.ETag ?? undefined;
-          transferInitiatedEventDispatched = true;
-        }
+        streams.push(getObject);
+        requests.push(getObjectRequest);
 
-        if (getObject.Body) {
-          streams.push(getObject.Body);
-          requests.push(getObjectRequest);
-
-          // TODO:
-          // after completing SEP requirements:
-          // - acquire lock on webstreams in the same
-          // -  synchronous frame as they are opened or else
-          // - the connection might be closed too early.
-          if (typeof (getObject.Body as ReadableStream).getReader === "function") {
-            const reader = (getObject.Body as any).getReader();
-            (getObject.Body as any).getReader = function () {
-              return reader;
-            };
-          }
-        }
-        this.assignMetadata(metadata, getObject);
+        // TODO:
+        // after completing SEP requirements:
+        // - acquire lock on webstreams in the same
+        // -  synchronous frame as they are opened or else
+        // - the connection might be closed too early.
+        //   if (typeof (getObject.Body as ReadableStream).getReader === "function") {
+        //     const reader = (getObject.Body as any).getReader();
+        //     (getObject.Body as any).getReader = function () {
+        //       return reader;
+        //     };
+        // }
 
         left = right + 1;
         right = Math.min(left + S3TransferManager.MIN_PART_SIZE, maxRange);
 
         remainingLength = Math.min(
           right - left,
-          Math.max(0, (getObject.ContentLength ?? 0) - S3TransferManager.MIN_PART_SIZE)
+          Math.max(0, (initalRangeGet.ContentLength ?? 0) - S3TransferManager.MIN_PART_SIZE)
         );
       }
+      console.log("Finished Get Requests");
     }
 
     const removeLocalEventListeners = () => {
@@ -378,7 +394,7 @@ export class S3TransferManager implements IS3TransferManager {
 
     const response = {
       ...metadata,
-      Body: joinStreams(streams, {
+      Body: await joinStreams(streams, {
         onBytes: (byteLength: number, index) => {
           this.dispatchEvent(
             Object.assign(new Event("bytesTransferred"), {

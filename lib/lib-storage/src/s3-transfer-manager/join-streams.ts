@@ -5,10 +5,10 @@ import { Readable } from "stream";
 import { JoinStreamIterationEvents } from "./types";
 
 // TODO: check all types. needs to join nodejs and browser together
-export function joinStreams(
-  streams: StreamingBlobPayloadOutputTypes[],
+export async function joinStreams(
+  streams: Promise<StreamingBlobPayloadOutputTypes>[],
   eventListeners?: JoinStreamIterationEvents
-): StreamingBlobPayloadOutputTypes {
+): Promise<StreamingBlobPayloadOutputTypes> {
   if (streams.length === 1) {
     return streams[0];
   } else if (isReadableStream(streams[0])) {
@@ -29,12 +29,13 @@ export function joinStreams(
 }
 
 export async function* iterateStreams(
-  streams: StreamingBlobPayloadOutputTypes[],
+  streams: Promise<StreamingBlobPayloadOutputTypes>[],
   eventListeners?: JoinStreamIterationEvents
 ): AsyncIterable<StreamingBlobPayloadOutputTypes, void, void> {
   let bytesTransferred = 0;
   let index = 0;
-  for (const stream of streams) {
+  for (const streamPromise of streams) {
+    const stream = await streamPromise;
     if (isReadableStream(stream)) {
       // const reader = stream.getReader();
       // while (true) {

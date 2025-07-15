@@ -792,8 +792,56 @@ describe("join-streams tests", () => {
       });
 
       describe("iterateStreams()", () => {
-        it(`Should iterate through single ${name} stream`, () => {});
-        it(`Should iterate through multiple ${name} streams in order`, () => {});
+        it(`Should iterate through single ${name} stream`, async () => {
+          if (name === "Readable") {
+            const stream1 = new Readable({
+              read() {
+                this.push(Buffer.from("stream 1"));
+                this.push(null);
+              },
+            });
+            const iterator = iterateStreams([stream1] as unknown as StreamingBlobPayloadOutputTypes[]);
+
+            const chunks: string[] = [];
+            for await (const chunk of iterator) {
+              chunks.push(chunk.toString());
+            }
+            expect(chunks).toEqual(["stream 1"]);
+          }
+        });
+        it(`Should iterate through multiple ${name} streams in order`, async () => {
+          if (name === "Readable") {
+            const stream1 = new Readable({
+              read() {
+                this.push(Buffer.from("stream 1"));
+                this.push(null);
+              },
+            });
+            const stream2 = new Readable({
+              read() {
+                this.push(Buffer.from("stream 2"));
+                this.push(null);
+              },
+            });
+            const stream3 = new Readable({
+              read() {
+                this.push(Buffer.from("stream 3"));
+                this.push(null);
+              },
+            });
+            const iterator = iterateStreams([
+              stream1,
+              stream2,
+              stream3,
+            ] as unknown as StreamingBlobPayloadOutputTypes[]);
+
+            const chunks: string[] = [];
+            for await (const chunk of iterator) {
+              chunks.push(chunk.toString());
+            }
+            expect(chunks).toEqual(["stream 1", "stream 2", "stream 3"]);
+          }
+        });
         it(`Should call onBytes callback during ${name} iteration`, () => {});
         it(`Should call onCompletion callback after ${name} iteration completes`, () => {});
         it(`Should call onFailure callback when ${name} iteration fails`, () => {});
