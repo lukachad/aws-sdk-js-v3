@@ -36,6 +36,7 @@ export class S3TransferManager implements IS3TransferManager {
   private readonly checksumAlgorithm: ChecksumAlgorithm;
   private readonly multipartDownloadType: "PART" | "RANGE";
   private readonly eventListeners: TransferEventListeners;
+  private readonly abortCleanupFunctions = new WeakMap<AbortSignal, () => void>();
 
   public constructor(config: S3TransferManagerConfig = {}) {
     this.checksumValidationEnabled = config.checksumValidationEnabled ?? true;
@@ -84,16 +85,8 @@ export class S3TransferManager implements IS3TransferManager {
     callback: EventListener<TransferEvent>,
     options?: AddEventListenerOptions | boolean
   ): void;
-  public addEventListener(
-    type: string,
-    callback: EventListener | null,
-    options?: AddEventListenerOptions | boolean
-  ): void;
-  public addEventListener(
-    type: unknown,
-    callback: EventListener<Event>,
-    options?: AddEventListenerOptions | boolean
-  ): void {
+  public addEventListener(type: string, callback: EventListener, options?: AddEventListenerOptions | boolean): void;
+  public addEventListener(type: string, callback: EventListener, options?: AddEventListenerOptions | boolean): void {
     const eventType = type as keyof TransferEventListeners;
     const listeners = this.eventListeners[eventType];
 
@@ -101,12 +94,25 @@ export class S3TransferManager implements IS3TransferManager {
       throw new Error(`Unknown event type: ${eventType}`);
     }
 
-    // TODO: Add support for AbortSignal
-
     const once = typeof options !== "boolean" && options?.once;
+    const signal = typeof options !== "boolean" ? options?.signal : undefined;
     let updatedCallback = callback;
+
+    if (signal?.aborted) {
+      return;
+    }
+
+    if (signal) {
+      const removeListenerAfterAbort = () => {
+        this.removeEventListener(eventType, updatedCallback);
+      };
+
+      this.abortCleanupFunctions.set(signal, () => signal.removeEventListener("abort", removeListenerAfterAbort));
+      signal.addEventListener("abort", removeListenerAfterAbort, { once: true });
+    }
+
     if (once) {
-      updatedCallback = (event: any) => {
+      updatedCallback = (event: Event) => {
         if (typeof callback === "function") {
           callback(event);
         } else {
@@ -115,29 +121,31 @@ export class S3TransferManager implements IS3TransferManager {
         this.removeEventListener(eventType, updatedCallback);
       };
     }
-
-    if (eventType === "transferInitiated" || eventType === "bytesTransferred" || eventType === "transferFailed") {
-      listeners.push(updatedCallback as EventListener<TransferEvent>);
-    } else if (eventType === "transferComplete") {
-      (listeners as EventListener<TransferCompleteEvent>[]).push(
-        updatedCallback as EventListener<TransferCompleteEvent>
-      );
-    }
+    listeners.push(updatedCallback);
   }
 
+  /**
+   * todo: what does the return boolean mean?
+   *
+   * it returns false if the event is cancellable, and at least oneo the handlers which received event called
+   * Event.preventDefault(). Otherwise true.
+   * The use cases of preventDefault() does not apply to transfermanager but we should still keep  the boolean
+   * and continue to return true to stay consistent with EventTarget.
+   *
+   */
   public dispatchEvent(event: Event & TransferEvent): boolean;
   public dispatchEvent(event: Event & TransferCompleteEvent): boolean;
   public dispatchEvent(event: Event): boolean;
-  public dispatchEvent(event: any): boolean {
+  public dispatchEvent(event: Event): boolean {
     const eventType = event.type;
-    const listeners = this.eventListeners[eventType as keyof TransferEventListeners];
+    const listeners = this.eventListeners[eventType as keyof TransferEventListeners] as EventListener[];
 
     if (listeners) {
-      for (const callback of listeners) {
-        if (typeof callback === "function") {
-          callback(event);
+      for (const listener of listeners) {
+        if (typeof listener === "function") {
+          listener(event);
         } else {
-          callback.handleEvent?.(event);
+          listener.handleEvent(event);
         }
       }
     }
@@ -166,25 +174,29 @@ export class S3TransferManager implements IS3TransferManager {
   ): void;
   public removeEventListener(
     type: string,
-    callback: EventListener | null,
+    callback: EventListener,
     options?: RemoveEventListenerOptions | boolean
   ): void;
-  public removeEventListener(type: unknown, callback: unknown, options?: unknown): void {
+  public removeEventListener(
+    type: string,
+    callback: EventListener,
+    options?: RemoveEventListenerOptions | boolean
+  ): void {
     const eventType = type as keyof TransferEventListeners;
     const listeners = this.eventListeners[eventType];
 
     if (listeners) {
-      if (eventType === "transferInitiated" || eventType === "bytesTransferred" || eventType === "transferFailed") {
+      if (
+        eventType === "transferInitiated" ||
+        eventType === "bytesTransferred" ||
+        eventType === "transferFailed" ||
+        eventType === "transferComplete"
+      ) {
         const eventListener = callback as EventListener<TransferEvent>;
-        const index = listeners.indexOf(eventListener);
-        if (index !== -1) {
+        let index = listeners.indexOf(eventListener);
+        while (index !== -1) {
           listeners.splice(index, 1);
-        }
-      } else if (eventType === "transferComplete") {
-        const eventListener = callback as EventListener<TransferCompleteEvent>;
-        const index = (listeners as EventListener<TransferCompleteEvent>[]).indexOf(eventListener);
-        if (index !== -1) {
-          (listeners as EventListener<TransferCompleteEvent>[]).splice(index, 1);
+          index = listeners.indexOf(eventListener);
         }
       } else {
         throw new Error(`Unknown event type: ${type}`);
@@ -205,38 +217,26 @@ export class S3TransferManager implements IS3TransferManager {
     const range = request.Range;
     let totalSize: number | undefined;
 
+    this.checkAborted(transferOptions);
+
+    // todo: save a reference to each of the download-scoped listeners
+    // todo: remove them at the end of the download.
+
     if (transferOptions?.eventListeners) {
-      for await (const listeners of this.iterateListeners(transferOptions?.eventListeners)) {
+      for (const listeners of this.iterateListeners(transferOptions?.eventListeners)) {
         for (const listener of listeners) {
           this.addEventListener(listener.eventType, listener.callback as EventListener);
         }
       }
     }
 
-    // TODO: Ensure download operation is treated as single object download when partNumber is provided regardless of multipartDownloadType setting
     if (typeof partNumber === "number") {
-      const getObjectRequest = {
-        ...request,
-        PartNumber: partNumber,
-      };
-      const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
-
-      this.dispatchEvent(
-        Object.assign(new Event("transferInitiated"), {
-          request,
-          snapshot: {
-            transferredBytes: 0,
-            totalBytes: getObject.ContentLength,
-          },
-        })
+      throw new Error(
+        "partNumber included: S3 Transfer Manager does not support downloads for specific parts. Use GetObjectCommand instead"
       );
-
-      if (getObject.Body) {
-        streams.push(getObject.Body);
-        requests.push(getObjectRequest);
-      }
-      this.assignMetadata(metadata, getObject);
     } else if (this.multipartDownloadType === "PART") {
+      this.checkAborted(transferOptions);
+
       if (range == null) {
         const initialPartRequest = {
           ...request,
@@ -256,6 +256,8 @@ export class S3TransferManager implements IS3TransferManager {
         if (initialPart.PartsCount! > 1) {
           let previousPart = initialPart;
           for (let part = 2; part <= initialPart.PartsCount!; part++) {
+            this.checkAborted(transferOptions);
+
             const getObjectRequest = {
               ...request,
               PartNumber: part,
@@ -276,6 +278,8 @@ export class S3TransferManager implements IS3TransferManager {
           }
         }
       } else {
+        this.checkAborted(transferOptions);
+
         const getObjectRequest = {
           ...request,
         };
@@ -290,6 +294,8 @@ export class S3TransferManager implements IS3TransferManager {
         this.assignMetadata(metadata, getObject);
       }
     } else if (this.multipartDownloadType === "RANGE") {
+      this.checkAborted(transferOptions);
+
       let initialETag = undefined;
       let left = 0;
       let right = S3TransferManager.MIN_PART_SIZE;
@@ -308,6 +314,8 @@ export class S3TransferManager implements IS3TransferManager {
 
       // TODO: Validate ranges for if multipartDownloadType === "RANGE"
       while (remainingLength > 0) {
+        this.checkAborted(transferOptions);
+
         const range = `bytes=${left}-${right}`;
         const getObjectRequest: GetObjectCommandInput = {
           ...request,
@@ -352,49 +360,62 @@ export class S3TransferManager implements IS3TransferManager {
       }
     }
 
-    const responseBody = joinStreams(streams, {
-      onBytes: (byteLength: number, index) => {
-        this.dispatchEvent(
-          Object.assign(new Event("bytesTransferred"), {
-            request: requests[index],
-            snapshot: {
-              transferredBytes: byteLength,
-              totalBytes: totalSize,
-            },
-          })
-        );
-      },
-      onCompletion: (byteLength: number, index) => {
-        this.dispatchEvent(
-          Object.assign(new Event("transferComplete"), {
-            request: requests[index],
-            response: {
-              ...metadata,
-              Body: responseBody,
-            },
-            snapshot: {
-              transferredBytes: byteLength,
-              totalBytes: totalSize,
-            },
-          })
-        );
-      },
-      onFailure: (error: unknown, index) => {
-        this.dispatchEvent(
-          Object.assign(new Event("transferFailed"), {
-            request: requests[index],
-            snapshot: {
-              transferredBytes: error,
-              totalBytes: totalSize,
-            },
-          })
-        );
-      },
-    });
+    const removeLocalEventListeners = () => {
+      if (transferOptions?.eventListeners) {
+        for (const listeners of this.iterateListeners(transferOptions?.eventListeners)) {
+          for (const listener of listeners) {
+            this.removeEventListener(listener.eventType, listener.callback as EventListener);
+          }
+        }
+      }
+
+      // remove any local abort() listeners after request completes.
+      if (transferOptions?.abortSignal) {
+        this.abortCleanupFunctions.get(transferOptions.abortSignal as AbortSignal)?.();
+        this.abortCleanupFunctions.delete(transferOptions.abortSignal as AbortSignal);
+      }
+    };
 
     const response = {
       ...metadata,
-      Body: responseBody,
+      Body: joinStreams(streams, {
+        onBytes: (byteLength: number, index) => {
+          this.dispatchEvent(
+            Object.assign(new Event("bytesTransferred"), {
+              request: requests[index],
+              snapshot: {
+                transferredBytes: byteLength,
+                totalBytes: totalSize,
+              },
+            })
+          );
+        },
+        onCompletion: (byteLength: number, index) => {
+          this.dispatchEvent(
+            Object.assign(new Event("transferComplete"), {
+              request: requests[index],
+              response,
+              snapshot: {
+                transferredBytes: byteLength,
+                totalBytes: totalSize,
+              },
+            })
+          );
+          removeLocalEventListeners();
+        },
+        onFailure: (error: unknown, index) => {
+          this.dispatchEvent(
+            Object.assign(new Event("transferFailed"), {
+              request: requests[index],
+              snapshot: {
+                transferredBytes: error,
+                totalBytes: totalSize,
+              },
+            })
+          );
+          removeLocalEventListeners();
+        },
+      }),
     };
 
     return response;
@@ -427,6 +448,12 @@ export class S3TransferManager implements IS3TransferManager {
     transferOptions?: TransferOptions;
   }): Promise<{ objectsDownloaded: number; objectsFailed: number }> {
     throw new Error("Method not implemented.");
+  }
+
+  private checkAborted(transferOptions?: TransferOptions): void {
+    if (transferOptions?.abortSignal?.aborted) {
+      throw Object.assign(new Error("Download aborted."), { name: "AbortError" });
+    }
   }
 
   private assignMetadata(container: any, response: any) {
@@ -476,8 +503,9 @@ export class S3TransferManager implements IS3TransferManager {
     console.log(count);
   }
 
-  private async *iterateListeners(eventListeners: TransferEventListeners) {
-    for (const eventType in eventListeners) {
+  private *iterateListeners(eventListeners: TransferEventListeners) {
+    for (const key in eventListeners) {
+      const eventType = key as keyof TransferEventListeners;
       const listeners = eventListeners[eventType as keyof TransferEventListeners];
       if (listeners) {
         for (const callback of listeners) {
@@ -503,9 +531,6 @@ export class S3TransferManager implements IS3TransferManager {
       };
     };
 
-    // TODO: throw error for incomplete download.
-    // Ex: final part and 8 bytes short should throw error -> "bytes 10485760-13631480/13631488"
-
     try {
       const previous = parseContentRange(previousPart);
       const current = parseContentRange(currentPart);
@@ -518,8 +543,6 @@ export class S3TransferManager implements IS3TransferManager {
         throw new Error(`Expected part ${partNum} to start at ${expectedStart} but got ${current.start}`);
       }
 
-      // console.log(currPartSize < prevPartSize);
-      // console.log(current.end !== current.total - 1);
       if (currPartSize < prevPartSize && current.end !== current.total - 1) {
         throw new Error(
           `Final part did not cover total range of ${current.total}. Expected range of bytes ${current.start}-${

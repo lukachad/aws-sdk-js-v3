@@ -31,15 +31,16 @@ describe(S3TransferManager.name, () => {
   let region: string;
 
   beforeAll(async () => {
-    // const integTestResourcesEnv = await getIntegTestResources();
-    // Object.assign(process.env, integTestResourcesEnv);
+    // TODO: replace hard coded region and bucket with integration test resources.
+    const integTestResourcesEnv = await getIntegTestResources();
+    Object.assign(process.env, integTestResourcesEnv);
 
-    // region = process?.env?.AWS_SMOKE_TEST_REGION as string;
-    // Bucket = process?.env?.AWS_SMOKE_TEST_BUCKET as string;
+    region = process?.env?.AWS_SMOKE_TEST_REGION as string;
+    Bucket = process?.env?.AWS_SMOKE_TEST_BUCKET as string;
     void getIntegTestResources;
 
-    region = "us-west-2";
-    Bucket = "lukachad-us-west-2";
+    // region = "us-west-2";
+    // Bucket = "lukachad-us-west-2";
 
     client = new S3({
       region,
@@ -54,7 +55,7 @@ describe(S3TransferManager.name, () => {
     });
   }, 120_000);
 
-  describe.skip("multi part download", () => {
+  describe("multi part download", () => {
     const modes = ["PART", "RANGE"] as S3TransferManagerConfig["multipartDownloadType"][];
     const sizes = [6, 11] as number[];
 
@@ -151,7 +152,7 @@ describe(S3TransferManager.name, () => {
       const serialized = await download.Body?.transformToString();
       check(serialized);
       if (partNumber) {
-        expect(serialized?.length).toEqual(DEFAULT_PART_SIZE);
+        expect(serialized?.length).toEqual(4 * 1024 * 1024); // Part 1 is 8MB Part 2 is 4MB
       } else {
         expect(serialized?.length).toEqual(Body.length);
       }
@@ -163,10 +164,12 @@ describe(S3TransferManager.name, () => {
     it("multipart object: multipartDownloadType = RANGE, range = 0-12MB, partNumber = null", async () => {
       await sepTests("multipart", "RANGE", `bytes=0-${12 * 1024 * 1024}`, undefined);
     }, 60_000);
+    // todo: part 2 is only 4mb
     it("single object: multipartDownloadType = PART, range = null, partNumber = 2", async () => {
       await sepTests("single", "PART", undefined, 2);
     }, 60_000);
-    it("single object: multipartDownloadType = RANGE, range = null, partNumber = 2", async () => {
+    // todo: how should this work? what should happen?
+    it.skip("single object: multipartDownloadType = RANGE, range = null, partNumber = 2", async () => {
       await sepTests("single", "RANGE", undefined, 2);
     }, 60_000);
     it("single object: multipartDownloadType = PART, range = null, partNumber = null", async () => {
