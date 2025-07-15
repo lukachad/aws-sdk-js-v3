@@ -32,15 +32,15 @@ describe(S3TransferManager.name, () => {
 
   beforeAll(async () => {
     // TODO: replace hard coded region and bucket with integration test resources.
-    // const integTestResourcesEnv = await getIntegTestResources();
-    // Object.assign(process.env, integTestResourcesEnv);
+    const integTestResourcesEnv = await getIntegTestResources();
+    Object.assign(process.env, integTestResourcesEnv);
 
-    // region = process?.env?.AWS_SMOKE_TEST_REGION as string;
-    // Bucket = process?.env?.AWS_SMOKE_TEST_BUCKET as string;
+    region = process?.env?.AWS_SMOKE_TEST_REGION as string;
+    Bucket = process?.env?.AWS_SMOKE_TEST_BUCKET as string;
     void getIntegTestResources;
 
-    region = "us-west-2";
-    Bucket = "lukachad-us-west-2";
+    // region = "us-west-2";
+    // Bucket = "lukachad-us-west-2";
 
     client = new S3({
       region,
@@ -55,7 +55,7 @@ describe(S3TransferManager.name, () => {
     });
   }, 120_000);
 
-  describe.skip("multi part download", () => {
+  describe("multi part download", () => {
     const modes = ["PART", "RANGE"] as S3TransferManagerConfig["multipartDownloadType"][];
     const sizes = [6, 11] as number[];
 
