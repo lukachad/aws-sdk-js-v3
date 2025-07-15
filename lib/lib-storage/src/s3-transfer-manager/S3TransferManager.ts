@@ -6,8 +6,7 @@ import type {
 } from "@aws-sdk/client-s3";
 import { GetObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getChecksum } from "@aws-sdk/middleware-flexible-checksums/dist-types/getChecksum";
-import { ChecksumConstructor, StreamingBlobPayloadOutputTypes } from "@smithy/types";
-import { Checksum } from "@smithy/types";
+import { type StreamingBlobPayloadOutputTypes, Checksum, ChecksumConstructor } from "@smithy/types";
 
 import type { AddEventListenerOptions, EventListener, RemoveEventListenerOptions } from "./event-listener-types";
 import { joinStreams } from "./join-streams";
@@ -234,7 +233,8 @@ export class S3TransferManager implements IS3TransferManager {
       throw new Error(
         "partNumber included: S3 Transfer Manager does not support downloads for specific parts. Use GetObjectCommand instead"
       );
-    } else if (this.multipartDownloadType === "PART") {
+    }
+    if (this.multipartDownloadType === "PART") {
       this.checkAborted(transferOptions);
 
       if (range == null) {
@@ -244,7 +244,7 @@ export class S3TransferManager implements IS3TransferManager {
         };
         const initialPart = await this.s3ClientInstance.send(new GetObjectCommand(initialPartRequest), transferOptions);
         const initialETag = initialPart.ETag ?? undefined;
-        totalSize = initialPart.ContentRange ? parseInt(initialPart.ContentRange.split("/")[1]) : undefined;
+        totalSize = initialPart.ContentRange ? Number.parseInt(initialPart.ContentRange.split("/")[1]) : undefined;
 
         this.dispatchTransferInitiatedEvent(request, totalSize);
         if (initialPart.Body) {
@@ -279,7 +279,7 @@ export class S3TransferManager implements IS3TransferManager {
           ...request,
         };
         const getObject = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
-        totalSize = getObject.ContentRange ? parseInt(getObject.ContentRange.split("/")[1]) : undefined;
+        totalSize = getObject.ContentRange ? Number.parseInt(getObject.ContentRange.split("/")[1]) : undefined;
 
         this.dispatchTransferInitiatedEvent(request, totalSize);
         if (getObject.Body) {
@@ -291,14 +291,13 @@ export class S3TransferManager implements IS3TransferManager {
     } else if (this.multipartDownloadType === "RANGE") {
       this.checkAborted(transferOptions);
 
-      let initialETag = undefined;
+      let initialETag: string | undefined;
       let left = 0;
       let right = S3TransferManager.MIN_PART_SIZE;
-      let maxRange = Infinity;
-      const range = `bytes=${left}-${right}`;
+      let maxRange = Number.POSITIVE_INFINITY;
 
-      if (range != null) {
-        const [userRangeLeft, userRangeRight] = range.replace("bytes=", "").split("-").map(Number);
+      if (request.Range != null) {
+        const [userRangeLeft, userRangeRight] = request.Range.replace("bytes=", "").split("-").map(Number);
 
         maxRange = userRangeRight;
         left = userRangeLeft;
@@ -310,21 +309,21 @@ export class S3TransferManager implements IS3TransferManager {
 
       const getObjectRequest: GetObjectCommandInput = {
         ...request,
-        Range: range,
+        Range: `bytes=${left}-${right}`,
         IfMatch: transferInitiatedEventDispatched && !request.VersionId ? initialETag : undefined,
       };
-      const initalRangeGet = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
+      const initialRangeGet = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
 
-      streams.push(Promise.resolve(initalRangeGet.Body!));
+      streams.push(Promise.resolve(initialRangeGet.Body!));
       requests.push(getObjectRequest);
-      this.assignMetadata(metadata, initalRangeGet);
+      this.assignMetadata(metadata, initialRangeGet);
 
       left = right + 1;
       right = Math.min(left + S3TransferManager.MIN_PART_SIZE, maxRange);
 
       remainingLength = Math.min(
         right - left,
-        Math.max(0, (initalRangeGet.ContentLength ?? 0) - S3TransferManager.MIN_PART_SIZE)
+        Math.max(0, (initialRangeGet.ContentLength ?? 0) - S3TransferManager.MIN_PART_SIZE)
       );
 
       // TODO: Validate ranges for if multipartDownloadType === "RANGE"
@@ -341,7 +340,7 @@ export class S3TransferManager implements IS3TransferManager {
           .send(new GetObjectCommand(getObjectRequest), transferOptions)
           .then((response) => {
             if (!transferInitiatedEventDispatched) {
-              totalSize = response.ContentRange ? parseInt(response.ContentRange.split("/")[1]) : undefined;
+              totalSize = response.ContentRange ? Number.parseInt(response.ContentRange.split("/")[1]) : undefined;
 
               this.dispatchTransferInitiatedEvent(request, totalSize);
               initialETag = response.ETag ?? undefined;
@@ -370,7 +369,7 @@ export class S3TransferManager implements IS3TransferManager {
 
         remainingLength = Math.min(
           right - left,
-          Math.max(0, (initalRangeGet.ContentLength ?? 0) - S3TransferManager.MIN_PART_SIZE)
+          Math.max(0, (initialRangeGet.ContentLength ?? 0) - S3TransferManager.MIN_PART_SIZE)
         );
       }
       console.log("Finished Get Requests");
@@ -541,9 +540,9 @@ export class S3TransferManager implements IS3TransferManager {
       const match = range.match(/bytes (\d+)-(\d+)\/(\d+)/);
       if (!match) throw new Error(`Invalid ContentRange format: ${range}`);
       return {
-        start: parseInt(match[1]),
-        end: parseInt(match[2]),
-        total: parseInt(match[3]),
+        start: Number.parseInt(match[1]),
+        end: Number.parseInt(match[2]),
+        total: Number.parseInt(match[3]),
       };
     };
 
