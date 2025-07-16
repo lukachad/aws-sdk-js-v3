@@ -291,9 +291,8 @@ export class S3TransferManager implements IS3TransferManager {
     } else if (this.multipartDownloadType === "RANGE") {
       this.checkAborted(transferOptions);
 
-      let initialETag: string | undefined;
       let left = 0;
-      let right = S3TransferManager.MIN_PART_SIZE;
+      let right = this.targetPartSizeBytes - 1;
       let maxRange = Number.POSITIVE_INFINITY;
 
       if (request.Range != null) {
@@ -301,30 +300,28 @@ export class S3TransferManager implements IS3TransferManager {
 
         maxRange = userRangeRight;
         left = userRangeLeft;
-        right = Math.min(userRangeRight, left + S3TransferManager.MIN_PART_SIZE);
+        right = Math.min(userRangeRight, left + S3TransferManager.MIN_PART_SIZE - 1);
       }
 
       let remainingLength = 1;
-      let transferInitiatedEventDispatched = false;
 
       const getObjectRequest: GetObjectCommandInput = {
         ...request,
         Range: `bytes=${left}-${right}`,
-        IfMatch: transferInitiatedEventDispatched && !request.VersionId ? initialETag : undefined,
       };
       const initialRangeGet = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
+      const initialETag = initialRangeGet.ETag ?? undefined;
+      totalSize = initialRangeGet.ContentRange
+        ? Number.parseInt(initialRangeGet.ContentRange.split("/")[1])
+        : undefined;
 
       streams.push(Promise.resolve(initialRangeGet.Body!));
       requests.push(getObjectRequest);
       this.assignMetadata(metadata, initialRangeGet);
 
       left = right + 1;
-      right = Math.min(left + S3TransferManager.MIN_PART_SIZE, maxRange);
-
-      remainingLength = Math.min(
-        right - left,
-        Math.max(0, (initialRangeGet.ContentLength ?? 0) - S3TransferManager.MIN_PART_SIZE)
-      );
+      right = Math.min(left + S3TransferManager.MIN_PART_SIZE - 1, maxRange);
+      remainingLength = totalSize ? Math.min(right - left + 1, Math.max(0, totalSize - left)) : 0;
 
       // TODO: Validate ranges for if multipartDownloadType === "RANGE"
       while (remainingLength > 0) {
@@ -334,18 +331,11 @@ export class S3TransferManager implements IS3TransferManager {
         const getObjectRequest: GetObjectCommandInput = {
           ...request,
           Range: range,
-          IfMatch: transferInitiatedEventDispatched && !request.VersionId ? initialETag : undefined,
+          IfMatch: !request.VersionId ? initialETag : undefined,
         };
         const getObject = this.s3ClientInstance
           .send(new GetObjectCommand(getObjectRequest), transferOptions)
           .then((response) => {
-            if (!transferInitiatedEventDispatched) {
-              totalSize = response.ContentRange ? Number.parseInt(response.ContentRange.split("/")[1]) : undefined;
-
-              this.dispatchTransferInitiatedEvent(request, totalSize);
-              initialETag = response.ETag ?? undefined;
-              transferInitiatedEventDispatched = true;
-            }
             return response.Body!;
           });
 
@@ -365,14 +355,9 @@ export class S3TransferManager implements IS3TransferManager {
         // }
 
         left = right + 1;
-        right = Math.min(left + S3TransferManager.MIN_PART_SIZE, maxRange);
-
-        remainingLength = Math.min(
-          right - left,
-          Math.max(0, (initialRangeGet.ContentLength ?? 0) - S3TransferManager.MIN_PART_SIZE)
-        );
+        right = Math.min(left + S3TransferManager.MIN_PART_SIZE - 1, maxRange);
+        remainingLength = totalSize ? Math.min(right - left + 1, Math.max(0, totalSize - left)) : 0;
       }
-      console.log("Finished Get Requests");
     }
 
     const removeLocalEventListeners = () => {
@@ -497,25 +482,6 @@ export class S3TransferManager implements IS3TransferManager {
       })
     );
     return true;
-  }
-
-  /**
-   * For debugging purposes
-   *
-   * @internal
-   */
-  private logCallbackCount(type: unknown): void {
-    const eventType = type as keyof TransferEventListeners;
-    const listeners = this.eventListeners[eventType];
-
-    console.log(`Callback count for ${eventType}: `);
-    let count = 0;
-    if (listeners) {
-      for (const callbacks of listeners) {
-        count++;
-      }
-    }
-    console.log(count);
   }
 
   private *iterateListeners(eventListeners: TransferEventListeners) {
