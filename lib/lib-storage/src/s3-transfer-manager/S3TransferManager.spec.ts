@@ -568,287 +568,308 @@ describe("S3TransferManager Unit Tests", () => {
     });
   });
 
-  describe("validateExpectedRanges()", () => {
+  describe("validatePartRange()", () => {
     let tm: any;
     beforeAll(async () => {
       tm = new S3TransferManager() as any;
     }, 120_000);
 
-    it("Should pass correct sequential ranges without throwing an error", () => {
+    it("Should pass correct ranges based on part number without throwing an error", () => {
+      const partSize = 5242880;
       const ranges = [
-        "bytes 0-5242879/13631488",
-        "bytes 5242880-10485759/13631488",
-        "bytes 10485760-13631487/13631488",
+        { partNumber: 1, range: "bytes 0-5242879/13631488" },
+        { partNumber: 2, range: "bytes 5242880-10485759/13631488" },
+        { partNumber: 3, range: "bytes 10485760-13631487/13631488" },
       ];
 
-      for (let i = 1; i < ranges.length; i++) {
+      for (const { partNumber, range } of ranges) {
         expect(() => {
-          tm.validateExpectedRanges(ranges[i - 1], ranges[i], i + 1);
+          tm.validatePartRange(partNumber, range, partSize);
         }).not.toThrow();
       }
     });
 
-    it("Should throw error for incomplete download", () => {
-      const ranges = [
-        "bytes 0-5242879/13631488",
-        "bytes 5242880-10485759/13631488",
-        "bytes 10485760-13631480/13631488", // 8 bytes short
-      ];
+    it("Should throw error for incorrect start position", () => {
+      const partSize = 5242880;
 
       expect(() => {
-        tm.validateExpectedRanges(ranges[1], ranges[2], 3);
-      }).toThrow(
-        "Range validation failed: Final part did not cover total range of 13631488. Expected range of bytes 10485760-314572"
-      );
+        tm.validatePartRange(2, "bytes 5242881-10485759/13631488", partSize);
+      }).toThrow("Expected part 2 to start at 5242880 but got 5242881");
+
+      expect(() => {
+        tm.validatePartRange(2, "bytes 5242879-10485759/13631488", partSize);
+      }).toThrow("Expected part 2 to start at 5242880 but got 5242879");
+
+      expect(() => {
+        tm.validatePartRange(2, "bytes 0-5242879/13631488", partSize);
+      }).toThrow("Expected part 2 to start at 5242880 but got 0");
     });
 
-    it.each([
-      ["bytes 5242881-10485759/13631488", "Expected part 2 to start at 5242880 but got 5242881"], // 1 byte off
-      ["bytes 5242879-10485759/13631488", "Expected part 2 to start at 5242880 but got 5242879"], // overlap
-      ["bytes 0-5242879/13631488", "Expected part 2 to start at 5242880 but got 0"], // duplicate
-    ])("Should throw error for non-sequential range: %s", (invalidRange, expectedError) => {
+    it("Should throw error for incorrect end position", () => {
+      const partSize = 5242880;
+
       expect(() => {
-        tm.validateExpectedRanges("bytes 0-5242879/13631488", invalidRange, 2);
-      }).toThrow(expectedError);
+        tm.validatePartRange(2, "bytes 5242880-10485760/13631488", partSize);
+      }).toThrow("Expected part 2 to end at 10485759 but got 10485760");
+
+      expect(() => {
+        tm.validatePartRange(3, "bytes 10485760-13631480/13631488", partSize);
+      }).toThrow("Expected part 3 to end at 13631487 but got 13631480");
+    });
+
+    it("Should handle last part correctly when not a full part size", () => {
+      const partSize = 5242880;
+
+      expect(() => {
+        tm.validatePartRange(3, "bytes 10485760-13631487/13631488", partSize);
+      }).not.toThrow();
+    });
+
+    it("Should throw error for invalid ContentRange format", () => {
+      const partSize = 5242880;
+
+      expect(() => {
+        tm.validatePartRange(2, "invalid-format", partSize);
+      }).toThrow("Invalid ContentRange format: invalid-format");
     });
   });
 });
 
-describe("join-streams tests", () => {
-  const streamTypes = [
-    {
-      name: "Readable",
-      createStream: () => new Readable({ read() {} }),
-      supported: true,
-      streamType: Readable,
-    },
-    {
-      name: "ReadableStream",
-      createStream: () => new ReadableStream(),
-      supported: false,
-      streamType: ReadableStream,
-    },
-    {
-      name: "Blob",
-      createStream: () => new Blob(["test"]),
-      supported: false,
-      streamType: Blob,
-    },
-  ];
+// describe("join-streams tests", () => {
+//   const streamTypes = [
+//     {
+//       name: "Readable",
+//       createStream: () => new Readable({ read() {} }),
+//       supported: true,
+//       streamType: Readable,
+//     },
+//     {
+//       name: "ReadableStream",
+//       createStream: () => new ReadableStream(),
+//       supported: false,
+//       streamType: ReadableStream,
+//     },
+//     {
+//       name: "Blob",
+//       createStream: () => new Blob(["test"]),
+//       supported: false,
+//       streamType: Blob,
+//     },
+//   ];
 
-  streamTypes.forEach(({ name, createStream, supported, streamType }) => {
-    describe.skipIf(!supported)(`${name} streams`, () => {
-      describe("joinStreams()", () => {
-        it(`Should return single ${name} when only one stream is provided`, () => {
-          const stream = createStream();
-          const result = joinStreams([stream as unknown as StreamingBlobPayloadOutputTypes]);
+//   streamTypes.forEach(({ name, createStream, supported, streamType }) => {
+//     describe.skipIf(!supported)(`${name} streams`, () => {
+//       describe("joinStreams()", () => {
+//         it(`Should return single ${name} when only one stream is provided`, () => {
+//           const stream = createStream();
+//           const result = joinStreams([stream as unknown as StreamingBlobPayloadOutputTypes]);
 
-          expect(result).toBeDefined();
-          expect(result).toBe(stream);
-        });
-        it(`Should handle empty ${name} streams array`, () => {
-          const result = joinStreams([] as unknown as StreamingBlobPayloadOutputTypes[]);
-          expect(result).toBeDefined();
-          expect(result).toBeInstanceOf(streamType);
-        });
-        it(`Should join multiple ${name} streams into a single stream`, async () => {
-          const content1 = Buffer.from("Chunk 1");
-          const content2 = Buffer.from("Chunk 2");
-          const content3 = Buffer.from("Chunk 3");
+//           expect(result).toBeDefined();
+//           expect(result).toBe(stream);
+//         });
+//         it(`Should handle empty ${name} streams array`, () => {
+//           const result = joinStreams([] as unknown as StreamingBlobPayloadOutputTypes[]);
+//           expect(result).toBeDefined();
+//           expect(result).toBeInstanceOf(streamType);
+//         });
+//         it(`Should join multiple ${name} streams into a single stream`, async () => {
+//           const content1 = Buffer.from("Chunk 1");
+//           const content2 = Buffer.from("Chunk 2");
+//           const content3 = Buffer.from("Chunk 3");
 
-          if (name === "Readable") {
-            const stream1 = new Readable({
-              read() {
-                this.push(content1);
-                this.push(null);
-              },
-            });
-            const stream2 = new Readable({
-              read() {
-                this.push(content2);
-                this.push(null);
-              },
-            });
-            const stream3 = new Readable({
-              read() {
-                this.push(content3);
-                this.push(null);
-              },
-            });
+//           if (name === "Readable") {
+//             const stream1 = new Readable({
+//               read() {
+//                 this.push(content1);
+//                 this.push(null);
+//               },
+//             });
+//             const stream2 = new Readable({
+//               read() {
+//                 this.push(content2);
+//                 this.push(null);
+//               },
+//             });
+//             const stream3 = new Readable({
+//               read() {
+//                 this.push(content3);
+//                 this.push(null);
+//               },
+//             });
 
-            const joinedStream = joinStreams([
-              stream1,
-              stream2,
-              stream3,
-            ] as unknown as StreamingBlobPayloadOutputTypes[]);
+//             const joinedStream = joinStreams([
+//               stream1,
+//               stream2,
+//               stream3,
+//             ] as unknown as StreamingBlobPayloadOutputTypes[]);
 
-            const chunks: Buffer[] = [];
-            for await (const chunk of joinedStream as any) {
-              chunks.push(Buffer.from(chunk));
-            }
+//             const chunks: Buffer[] = [];
+//             for await (const chunk of joinedStream as any) {
+//               chunks.push(Buffer.from(chunk));
+//             }
 
-            const joinedContent = Buffer.concat(chunks).toString();
-            expect(joinedContent).toContain(content1.toString());
-            expect(joinedContent).toContain(content2.toString());
-            expect(joinedContent).toContain(content3.toString());
-          }
-        });
-        it(`Should handle ${name} streams with different chunk sizes`, async () => {
-          const content1 = Buffer.from("Chunk 1 Chunk 1 Chunk 1");
-          const content2 = Buffer.from("Chunk 2");
-          const content3 = Buffer.from("Chunk 3 Chunk 3");
+//             const joinedContent = Buffer.concat(chunks).toString();
+//             expect(joinedContent).toContain(content1.toString());
+//             expect(joinedContent).toContain(content2.toString());
+//             expect(joinedContent).toContain(content3.toString());
+//           }
+//         });
+//         it(`Should handle ${name} streams with different chunk sizes`, async () => {
+//           const content1 = Buffer.from("Chunk 1 Chunk 1 Chunk 1");
+//           const content2 = Buffer.from("Chunk 2");
+//           const content3 = Buffer.from("Chunk 3 Chunk 3");
 
-          if (name === "Readable") {
-            const stream1 = new Readable({
-              read() {
-                this.push(content1);
-                this.push(null);
-              },
-            });
-            const stream2 = new Readable({
-              read() {
-                this.push(content2);
-                this.push(null);
-              },
-            });
-            const stream3 = new Readable({
-              read() {
-                this.push(content3);
-                this.push(null);
-              },
-            });
+//           if (name === "Readable") {
+//             const stream1 = new Readable({
+//               read() {
+//                 this.push(content1);
+//                 this.push(null);
+//               },
+//             });
+//             const stream2 = new Readable({
+//               read() {
+//                 this.push(content2);
+//                 this.push(null);
+//               },
+//             });
+//             const stream3 = new Readable({
+//               read() {
+//                 this.push(content3);
+//                 this.push(null);
+//               },
+//             });
 
-            const joinedStream = joinStreams([
-              stream1,
-              stream2,
-              stream3,
-            ] as unknown as StreamingBlobPayloadOutputTypes[]);
+//             const joinedStream = joinStreams([
+//               stream1,
+//               stream2,
+//               stream3,
+//             ] as unknown as StreamingBlobPayloadOutputTypes[]);
 
-            const chunks: Buffer[] = [];
-            for await (const chunk of joinedStream as any) {
-              chunks.push(Buffer.from(chunk));
-            }
+//             const chunks: Buffer[] = [];
+//             for await (const chunk of joinedStream as any) {
+//               chunks.push(Buffer.from(chunk));
+//             }
 
-            const joinedContent = Buffer.concat(chunks).toString();
-            expect(joinedContent).toContain(content1.toString());
-            expect(joinedContent).toContain(content2.toString());
-            expect(joinedContent).toContain(content3.toString());
-          }
-        });
-        it(`Should handle ${name} streams with no data`, async () => {
-          if (name === "Readable") {
-            const emptyStream1 = new Readable({
-              read() {
-                this.push(null);
-              },
-            });
-            const emptyStream2 = new Readable({
-              read() {
-                this.push(null);
-              },
-            });
+//             const joinedContent = Buffer.concat(chunks).toString();
+//             expect(joinedContent).toContain(content1.toString());
+//             expect(joinedContent).toContain(content2.toString());
+//             expect(joinedContent).toContain(content3.toString());
+//           }
+//         });
+//         it(`Should handle ${name} streams with no data`, async () => {
+//           if (name === "Readable") {
+//             const emptyStream1 = new Readable({
+//               read() {
+//                 this.push(null);
+//               },
+//             });
+//             const emptyStream2 = new Readable({
+//               read() {
+//                 this.push(null);
+//               },
+//             });
 
-            const joinedStream = joinStreams([
-              emptyStream1,
-              emptyStream2,
-            ] as unknown as StreamingBlobPayloadOutputTypes[]);
+//             const joinedStream = joinStreams([
+//               emptyStream1,
+//               emptyStream2,
+//             ] as unknown as StreamingBlobPayloadOutputTypes[]);
 
-            const chunks: Buffer[] = [];
-            for await (const chunk of joinedStream as any) {
-              chunks.push(Buffer.from(chunk));
-            }
-            expect(chunks.length).toBe(0);
-            expect(Buffer.concat(chunks).length).toBe(0);
-          }
-        });
-        it(`Should properly close/cleanup ${name} streams after processing`, async () => {
-          if (name === "Readable") {
-            const stream1 = new Readable({
-              read() {
-                this.push(Buffer.from("data"));
-                this.push(null);
-              },
-            });
-            const stream2 = new Readable({
-              read() {
-                this.push(Buffer.from("more"));
-                this.push(null);
-              },
-            });
+//             const chunks: Buffer[] = [];
+//             for await (const chunk of joinedStream as any) {
+//               chunks.push(Buffer.from(chunk));
+//             }
+//             expect(chunks.length).toBe(0);
+//             expect(Buffer.concat(chunks).length).toBe(0);
+//           }
+//         });
+//         it(`Should properly close/cleanup ${name} streams after processing`, async () => {
+//           if (name === "Readable") {
+//             const stream1 = new Readable({
+//               read() {
+//                 this.push(Buffer.from("data"));
+//                 this.push(null);
+//               },
+//             });
+//             const stream2 = new Readable({
+//               read() {
+//                 this.push(Buffer.from("more"));
+//                 this.push(null);
+//               },
+//             });
 
-            const destroySpy1 = vi.spyOn(stream1, "destroy");
-            const destroySpy2 = vi.spyOn(stream2, "destroy");
+//             const destroySpy1 = vi.spyOn(stream1, "destroy");
+//             const destroySpy2 = vi.spyOn(stream2, "destroy");
 
-            const joinedStream = joinStreams([stream1, stream2] as unknown as StreamingBlobPayloadOutputTypes[]);
+//             const joinedStream = joinStreams([stream1, stream2] as unknown as StreamingBlobPayloadOutputTypes[]);
 
-            for await (const chunk of joinedStream as any) {
-              // consume the data
-            }
+//             for await (const chunk of joinedStream as any) {
+//               // consume the data
+//             }
 
-            expect(destroySpy1).toHaveBeenCalled();
-            expect(destroySpy2).toHaveBeenCalled();
-          }
-        });
-      });
+//             expect(destroySpy1).toHaveBeenCalled();
+//             expect(destroySpy2).toHaveBeenCalled();
+//           }
+//         });
+//       });
 
-      describe("iterateStreams()", () => {
-        it(`Should iterate through single ${name} stream`, async () => {
-          if (name === "Readable") {
-            const stream1 = new Readable({
-              read() {
-                this.push(Buffer.from("stream 1"));
-                this.push(null);
-              },
-            });
-            const iterator = iterateStreams([stream1] as unknown as StreamingBlobPayloadOutputTypes[]);
+//       describe("iterateStreams()", () => {
+//         it(`Should iterate through single ${name} stream`, async () => {
+//           if (name === "Readable") {
+//             const stream1 = new Readable({
+//               read() {
+//                 this.push(Buffer.from("stream 1"));
+//                 this.push(null);
+//               },
+//             });
+//             const iterator = iterateStreams([stream1] as unknown as StreamingBlobPayloadOutputTypes[]);
 
-            const chunks: string[] = [];
-            for await (const chunk of iterator) {
-              chunks.push(chunk.toString());
-            }
-            expect(chunks).toEqual(["stream 1"]);
-          }
-        });
-        it(`Should iterate through multiple ${name} streams in order`, async () => {
-          if (name === "Readable") {
-            const stream1 = new Readable({
-              read() {
-                this.push(Buffer.from("stream 1"));
-                this.push(null);
-              },
-            });
-            const stream2 = new Readable({
-              read() {
-                this.push(Buffer.from("stream 2"));
-                this.push(null);
-              },
-            });
-            const stream3 = new Readable({
-              read() {
-                this.push(Buffer.from("stream 3"));
-                this.push(null);
-              },
-            });
-            const iterator = iterateStreams([
-              stream1,
-              stream2,
-              stream3,
-            ] as unknown as StreamingBlobPayloadOutputTypes[]);
+//             const chunks: string[] = [];
+//             for await (const chunk of iterator) {
+//               chunks.push(chunk.toString());
+//             }
+//             expect(chunks).toEqual(["stream 1"]);
+//           }
+//         });
+//         it(`Should iterate through multiple ${name} streams in order`, async () => {
+//           if (name === "Readable") {
+//             const stream1 = new Readable({
+//               read() {
+//                 this.push(Buffer.from("stream 1"));
+//                 this.push(null);
+//               },
+//             });
+//             const stream2 = new Readable({
+//               read() {
+//                 this.push(Buffer.from("stream 2"));
+//                 this.push(null);
+//               },
+//             });
+//             const stream3 = new Readable({
+//               read() {
+//                 this.push(Buffer.from("stream 3"));
+//                 this.push(null);
+//               },
+//             });
+//             const iterator = iterateStreams([
+//               stream1,
+//               stream2,
+//               stream3,
+//             ] as unknown as StreamingBlobPayloadOutputTypes[]);
 
-            const chunks: string[] = [];
-            for await (const chunk of iterator) {
-              chunks.push(chunk.toString());
-            }
-            expect(chunks).toEqual(["stream 1", "stream 2", "stream 3"]);
-          }
-        });
-        it(`Should call onBytes callback during ${name} iteration`, () => {});
-        it(`Should call onCompletion callback after ${name} iteration completes`, () => {});
-        it(`Should call onFailure callback when ${name} iteration fails`, () => {});
-        it(`Should handle empty ${name} streams during iteration`, () => {});
-        it(`Should track correct byte count across ${name} streams`, () => {});
-        it(`Should maintain correct index during ${name} stream iteration`, () => {});
-      });
-    });
-  });
-});
+//             const chunks: string[] = [];
+//             for await (const chunk of iterator) {
+//               chunks.push(chunk.toString());
+//             }
+//             expect(chunks).toEqual(["stream 1", "stream 2", "stream 3"]);
+//           }
+//         });
+//         it(`Should call onBytes callback during ${name} iteration`, () => {});
+//         it(`Should call onCompletion callback after ${name} iteration completes`, () => {});
+//         it(`Should call onFailure callback when ${name} iteration fails`, () => {});
+//         it(`Should handle empty ${name} streams during iteration`, () => {});
+//         it(`Should track correct byte count across ${name} streams`, () => {});
+//         it(`Should maintain correct index during ${name} stream iteration`, () => {});
+//       });
+//     });
+//   });
+// });

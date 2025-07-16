@@ -265,6 +265,7 @@ export class S3TransferManager implements IS3TransferManager {
             const getObject = this.s3ClientInstance
               .send(new GetObjectCommand(getObjectRequest), transferOptions)
               .then((response) => {
+                this.validatePartRange(part, response.ContentRange, this.targetPartSizeBytes);
                 return response.Body!;
               });
 
@@ -323,7 +324,8 @@ export class S3TransferManager implements IS3TransferManager {
       right = Math.min(left + S3TransferManager.MIN_PART_SIZE - 1, maxRange);
       remainingLength = totalSize ? Math.min(right - left + 1, Math.max(0, totalSize - left)) : 0;
 
-      // TODO: Validate ranges for if multipartDownloadType === "RANGE"
+      this.dispatchTransferInitiatedEvent(request, totalSize);
+
       while (remainingLength > 0) {
         this.checkAborted(transferOptions);
 
@@ -336,6 +338,9 @@ export class S3TransferManager implements IS3TransferManager {
         const getObject = this.s3ClientInstance
           .send(new GetObjectCommand(getObjectRequest), transferOptions)
           .then((response) => {
+            // each range is being downloaded at a seemingly arbitrary order
+            // unsure if this may cause issues for the final object after join-streams
+            console.log(range);
             return response.Body!;
           });
 
@@ -501,38 +506,35 @@ export class S3TransferManager implements IS3TransferManager {
     }
   }
 
-  private validateExpectedRanges(previousPart: string, currentPart: string, partNum: number) {
-    const parseContentRange = (range: string) => {
-      const match = range.match(/bytes (\d+)-(\d+)\/(\d+)/);
-      if (!match) throw new Error(`Invalid ContentRange format: ${range}`);
-      return {
-        start: Number.parseInt(match[1]),
-        end: Number.parseInt(match[2]),
-        total: Number.parseInt(match[3]),
-      };
-    };
+  private validatePartRange(partNumber: number, contentRange: string | undefined, partSize: number) {
+    if (!contentRange) return;
 
-    try {
-      const previous = parseContentRange(previousPart);
-      const current = parseContentRange(currentPart);
+    const match = contentRange.match(/bytes (\d+)-(\d+)\/(\d+)/);
+    if (!match) throw new Error(`Invalid ContentRange format: ${contentRange}`);
 
-      const expectedStart = previous.end + 1;
-      const prevPartSize = previous.end - previous.start + 1;
-      const currPartSize = current.end - current.start + 1;
+    const start = Number.parseInt(match[1]);
+    const end = Number.parseInt(match[2]);
+    const total = Number.parseInt(match[3]);
 
-      if (current.start !== expectedStart) {
-        throw new Error(`Expected part ${partNum} to start at ${expectedStart} but got ${current.start}`);
-      }
+    // Calculate expected range based on part number and part size
+    const expectedStart = (partNumber - 1) * partSize;
+    const expectedEnd = Math.min(expectedStart + partSize - 1, total - 1);
 
-      if (currPartSize < prevPartSize && current.end !== current.total - 1) {
-        throw new Error(
-          `Final part did not cover total range of ${current.total}. Expected range of bytes ${current.start}-${
-            currPartSize - 1
-          }`
-        );
-      }
-    } catch (error) {
-      throw new Error(`Range validation failed: ${error.message}`);
+    // console.log({
+    //   partNumber,
+    //   start,
+    //   end,
+    //   total,
+    //   expectedStart,
+    //   expectedEnd
+    // });
+
+    if (start !== expectedStart) {
+      throw new Error(`Expected part ${partNumber} to start at ${expectedStart} but got ${start}`);
+    }
+
+    if (end !== expectedEnd) {
+      throw new Error(`Expected part ${partNumber} to end at ${expectedEnd} but got ${end}`);
     }
   }
 }
