@@ -9,9 +9,7 @@ export async function joinStreams(
   streams: Promise<StreamingBlobPayloadOutputTypes>[],
   eventListeners?: JoinStreamIterationEvents
 ): Promise<StreamingBlobPayloadOutputTypes> {
-  if (streams.length === 1) {
-    return streams[0];
-  } else if (isReadableStream(streams[0])) {
+  if (isReadableStream(streams[0])) {
     const newReadableStream = new ReadableStream({
       async start(controller) {
         for await (const chunk of iterateStreams(streams, eventListeners)) {

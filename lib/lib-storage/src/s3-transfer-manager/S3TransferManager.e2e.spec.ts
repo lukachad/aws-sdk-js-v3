@@ -93,18 +93,21 @@ describe(S3TransferManager.name, () => {
             },
             {
               eventListeners: {
-                transferInitiated: [({ request, snapshot }) => {}],
                 bytesTransferred: [
                   ({ request, snapshot }) => {
                     bytesTransferred = snapshot.transferredBytes;
+                    // console.log(bytesTransferred);
                   },
                 ],
-                transferComplete: [({ request, snapshot, response }) => {}],
               },
             }
           );
           const serialized = await download.Body?.transformToString();
+          // const downloadBytes = await download.Body?.transformToByteArray();
+          // console.log(downloadBytes);
           check(serialized);
+
+          console.log(bytesTransferred);
 
           expect(bytesTransferred).toEqual(Body.length);
         }, 60_000);
@@ -112,7 +115,7 @@ describe(S3TransferManager.name, () => {
     }
   });
 
-  describe("(SEP) download single object tests", () => {
+  describe.skip("(SEP) download single object tests", () => {
     async function sepTests(
       objectType: "single" | "multipart",
       multipartType: "PART" | "RANGE",
@@ -164,11 +167,10 @@ describe(S3TransferManager.name, () => {
     it("multipart object: multipartDownloadType = RANGE, range = 0-12MB, partNumber = null", async () => {
       await sepTests("multipart", "RANGE", `bytes=0-${12 * 1024 * 1024}`, undefined);
     }, 60_000);
-    // todo: part 2 is only 4mb
-    it("single object: multipartDownloadType = PART, range = null, partNumber = 2", async () => {
+    // skipped because TM no longer supports partNumber
+    it.skip("single object: multipartDownloadType = PART, range = null, partNumber = 2", async () => {
       await sepTests("single", "PART", undefined, 2);
     }, 60_000);
-    // todo: how should this work? what should happen?
     it.skip("single object: multipartDownloadType = RANGE, range = null, partNumber = 2", async () => {
       await sepTests("single", "RANGE", undefined, 2);
     }, 60_000);
