@@ -103,11 +103,7 @@ describe(S3TransferManager.name, () => {
             }
           );
           const serialized = await download.Body?.transformToString();
-          // const downloadBytes = await download.Body?.transformToByteArray();
-          // console.log(downloadBytes);
           check(serialized);
-
-          console.log(bytesTransferred);
 
           expect(bytesTransferred).toEqual(Body.length);
         }, 60_000);

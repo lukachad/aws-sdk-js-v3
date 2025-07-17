@@ -243,6 +243,12 @@ export class S3TransferManager implements IS3TransferManager {
       }
     };
 
+    // TODO:
+    // after completing SEP requirements:
+    // - acquire lock on webstreams in the same
+    // - synchronous frame as they are opened or else
+    // - the connection might be closed too early.
+
     const response = {
       ...metadata,
       Body: await joinStreams(streams, {
@@ -338,6 +344,12 @@ export class S3TransferManager implements IS3TransferManager {
 
       this.dispatchTransferInitiatedEvent(request, totalSize);
       if (initialPart.Body) {
+        if (initialPart.Body && typeof (initialPart.Body as any).getReader === "function") {
+          const reader = (initialPart.Body as any).getReader();
+          (initialPart.Body as any).getReader = function () {
+            return reader;
+          };
+        }
         streams.push(Promise.resolve(initialPart.Body));
         requests.push(initialPartRequest);
       }
@@ -356,6 +368,12 @@ export class S3TransferManager implements IS3TransferManager {
             .send(new GetObjectCommand(getObjectRequest), transferOptions)
             .then((response) => {
               // this.validatePartRange(part, response.ContentRange, this.targetPartSizeBytes);
+              if (response.Body && typeof (response.Body as any).getReader === "function") {
+                const reader = (response.Body as any).getReader();
+                (response.Body as any).getReader = function () {
+                  return reader;
+                };
+              }
               return response.Body!;
             });
 
@@ -416,6 +434,12 @@ export class S3TransferManager implements IS3TransferManager {
     const totalSize = initialRangeGet.ContentRange
       ? Number.parseInt(initialRangeGet.ContentRange.split("/")[1])
       : undefined;
+    if (initialRangeGet.Body && typeof (initialRangeGet.Body as any).getReader === "function") {
+      const reader = (initialRangeGet.Body as any).getReader();
+      (initialRangeGet.Body as any).getReader = function () {
+        return reader;
+      };
+    }
 
     this.dispatchTransferInitiatedEvent(request, totalSize);
 
@@ -439,23 +463,17 @@ export class S3TransferManager implements IS3TransferManager {
       const getObject = this.s3ClientInstance
         .send(new GetObjectCommand(getObjectRequest), transferOptions)
         .then((response) => {
+          if (response.Body && typeof (response.Body as any).getReader === "function") {
+            const reader = (response.Body as any).getReader();
+            (response.Body as any).getReader = function () {
+              return reader;
+            };
+          }
           return response.Body!;
         });
 
       streams.push(getObject);
       requests.push(getObjectRequest);
-
-      // TODO:
-      // after completing SEP requirements:
-      // - acquire lock on webstreams in the same
-      // -  synchronous frame as they are opened or else
-      // - the connection might be closed too early.
-      //   if (typeof (getObject.Body as ReadableStream).getReader === "function") {
-      //     const reader = (getObject.Body as any).getReader();
-      //     (getObject.Body as any).getReader = function () {
-      //       return reader;
-      //     };
-      // }
 
       left = right + 1;
       right = Math.min(left + S3TransferManager.MIN_PART_SIZE - 1, maxRange);
