@@ -1,5 +1,5 @@
 import { StreamingBlobPayloadOutputTypes } from "@smithy/types";
-import { isBlob, isReadableStream, sdkStreamMixin } from "@smithy/util-stream";
+import { isReadableStream, sdkStreamMixin } from "@smithy/util-stream";
 import { Readable } from "stream";
 
 import { JoinStreamIterationEvents } from "./types";
@@ -19,8 +19,6 @@ export async function joinStreams(
       },
     });
     return sdkStreamMixin(newReadableStream);
-  } else if (isBlob(streams[0])) {
-    throw new Error("Blob not supported yet");
   } else {
     return sdkStreamMixin(Readable.from(iterateStreams(streams, eventListeners)));
   }
@@ -43,20 +41,14 @@ export async function* iterateStreams(
         }
         yield value;
         bytesTransferred += value.byteLength;
+        eventListeners?.onBytes?.(bytesTransferred, index);
       }
       reader.releaseLock();
-
-      // const failure = new Error(`ReadableStreams not supported yet ${(stream as any)?.constructor?.name}`);
-      // eventListeners?.onFailure?.(failure, index);
-      // throw failure;
-    } else if (isBlob(stream)) {
-      throw new Error("Blob not supported yet");
     } else if (stream instanceof Readable) {
       for await (const chunk of stream) {
         yield chunk;
         const chunkSize = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
         bytesTransferred += chunkSize;
-
         eventListeners?.onBytes?.(bytesTransferred, index);
       }
     } else {
