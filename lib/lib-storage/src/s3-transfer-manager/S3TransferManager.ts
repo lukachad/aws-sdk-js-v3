@@ -211,7 +211,7 @@ export class S3TransferManager implements IS3TransferManager {
   /**
    * What is missing from the revised SEP and this implementation currently?
    * PART mode:
-   * - Step 5: validate GetObject response for each part
+   * - (DONE) Step 5: validate GetObject response for each part
    *    - If validation fails at any point, cancel all ongoing requests and error out
    * - Step 6: after all requests have been sent, validate that the total number of part GET requests sent matches with the
    *   expected `PartsCount`
@@ -222,7 +222,7 @@ export class S3TransferManager implements IS3TransferManager {
    *      the checksum value returned from a part GET request is not the composite
    *      checksum for the entire object
    * RANGE mode:
-   * - Step 7: validate GetObject response for each part. If validation fails or a
+   * - (DONE) Step 7: validate GetObject response for each part. If validation fails or a
    *   request fails at any point, cancel all ongoing requests and return an error to
    *   the user.
    * - Step 8: after all requests have sent, validate that the total number of ranged
@@ -399,7 +399,7 @@ export class S3TransferManager implements IS3TransferManager {
           const getObject = this.s3ClientInstance
             .send(new GetObjectCommand(getObjectRequest), transferOptions)
             .then((response) => {
-              this.validatePartRange(part, response.ContentRange, partSize ?? 0);
+              this.validatePartDownload(part, response.ContentRange, partSize ?? 0);
               if (response.Body && typeof (response.Body as any).getReader === "function") {
                 const reader = (response.Body as any).getReader();
                 (response.Body as any).getReader = function () {
@@ -448,7 +448,6 @@ export class S3TransferManager implements IS3TransferManager {
     let left = 0;
     let right = this.targetPartSizeBytes - 1;
     let maxRange = Number.POSITIVE_INFINITY;
-
     if (request.Range != null) {
       const [userRangeLeft, userRangeRight] = request.Range.replace("bytes=", "").split("-").map(Number);
 
@@ -463,6 +462,11 @@ export class S3TransferManager implements IS3TransferManager {
       Range: `bytes=${left}-${right}`,
     };
     const initialRangeGet = await this.s3ClientInstance.send(new GetObjectCommand(getObjectRequest), transferOptions);
+    // console.log({
+    //   initialRange: `bytes=${left}-${right}`,
+    //   InitialRangeContentRange: initialRangeGet.ContentRange,
+    // });
+    this.validateRangeDownload(`bytes=${left}-${right}`, initialRangeGet.ContentRange);
     const initialETag = initialRangeGet.ETag ?? undefined;
     const totalSize = initialRangeGet.ContentRange
       ? Number.parseInt(initialRangeGet.ContentRange.split("/")[1])
@@ -497,6 +501,7 @@ export class S3TransferManager implements IS3TransferManager {
       const getObject = this.s3ClientInstance
         .send(new GetObjectCommand(getObjectRequest), transferOptions)
         .then((response) => {
+          this.validateRangeDownload(range, response.ContentRange);
           if (response.Body && typeof (response.Body as any).getReader === "function") {
             const reader = (response.Body as any).getReader();
             (response.Body as any).getReader = function () {
@@ -593,7 +598,7 @@ export class S3TransferManager implements IS3TransferManager {
     }
   }
 
-  private validatePartRange(partNumber: number, contentRange: string | undefined, partSize: number) {
+  private validatePartDownload(partNumber: number, contentRange: string | undefined, partSize: number) {
     if (!contentRange) return;
 
     const match = contentRange.match(/bytes (\d+)-(\d+)\/(\d+)/);
@@ -606,22 +611,39 @@ export class S3TransferManager implements IS3TransferManager {
     const expectedStart = (partNumber - 1) * partSize;
     const expectedEnd = Math.min(expectedStart + partSize - 1, total - 1);
 
-    // console.log({
-    //   partSize,
-    //   partNumber,
-    //   start,
-    //   end,
-    //   total,
-    //   expectedStart,
-    //   expectedEnd
-    // });
-
     if (start !== expectedStart) {
       throw new Error(`Expected part ${partNumber} to start at ${expectedStart} but got ${start}`);
     }
 
     if (end !== expectedEnd) {
       throw new Error(`Expected part ${partNumber} to end at ${expectedEnd} but got ${end}`);
+    }
+  }
+
+  private validateRangeDownload(requestRange: string, responseRange: string | undefined) {
+    if (!responseRange) return;
+
+    const match = responseRange.match(/bytes (\d+)-(\d+)\/(\d+)/);
+    if (!match) throw new Error(`Invalid ContentRange format: ${responseRange}`);
+
+    const start = Number.parseInt(match[1]);
+    const end = Number.parseInt(match[2]);
+    const total = Number.parseInt(match[3]);
+
+    const rangeMatch = requestRange.match(/bytes=(\d+)-(\d+)/);
+    if (!rangeMatch) throw new Error(`Invalid Range format: ${requestRange}`);
+
+    const expectedStart = Number.parseInt(rangeMatch[1]);
+    const expectedEnd = Number.parseInt(rangeMatch[2]);
+
+    if (start !== expectedStart) {
+      throw new Error(`Expected range to start at ${expectedStart} but got ${start}`);
+    }
+
+    const isFinalPart = end + 1 === total;
+
+    if (end !== expectedEnd && !(isFinalPart && end < expectedEnd)) {
+      throw new Error(`Expected range to end at ${expectedEnd} but got ${end}`);
     }
   }
 }
