@@ -212,15 +212,15 @@ export class S3TransferManager implements IS3TransferManager {
    * What is missing from the revised SEP and this implementation currently?
    * PART mode:
    * - Step 5: validate GetObject response for each part
-   *  - If validation fails at any point, cancel all ongoing requests and error out
+   *    - If validation fails at any point, cancel all ongoing requests and error out
    * - Step 6: after all requests have been sent, validate that the total number of part GET requests sent matches with the
    *   expected `PartsCount`
    * - Step 7: when creating DownloadResponse, set accordingly:
-   *  - (DONE) `ContentLength` : total length of the object saved from Step 3
-   *  - (DONE) `ContentRange`: based on `bytes 0-(ContentLength -1)/ContentLength`
-   *  - If ChecksumType is `COMPOSITE`, set all checksum value members to null as
-   *    the checksum value returned from a part GET request is not the composite
-   *    checksum for the entire object
+   *    - (DONE) `ContentLength` : total length of the object saved from Step 3
+   *    - (DONE) `ContentRange`: based on `bytes 0-(ContentLength -1)/ContentLength`
+   *    - If ChecksumType is `COMPOSITE`, set all checksum value members to null as
+   *      the checksum value returned from a part GET request is not the composite
+   *      checksum for the entire object
    * RANGE mode:
    * - Step 7: validate GetObject response for each part. If validation fails or a
    *   request fails at any point, cancel all ongoing requests and return an error to
@@ -229,11 +229,11 @@ export class S3TransferManager implements IS3TransferManager {
    *   GET requests sent matches with the expected number saved from Step 5.
    * - Step 9: create DownloadResponse. Copy the fields in GetObject response from
    *   Step 3 and set the following fields accordingly:
-   *  - (DONE) `ContentLength` : total length of the object saved from Step 3
-   *  - (DONE) `ContentRange`: based on `bytes 0-(ContentLength -1)/ContentLength`
-   *  - If ChecksumType is `COMPOSITE`, set all checksum value members to null as
-   *    the checksum value returned from a part GET request is not the composite
-   *    checksum for the entire object
+   *    - (DONE) `ContentLength` : total length of the object saved from Step 3
+   *    - (DONE) `ContentRange`: based on `bytes 0-(ContentLength -1)/ContentLength`
+   *    - If ChecksumType is `COMPOSITE`, set all checksum value members to null as
+   *      the checksum value returned from a part GET request is not the composite
+   *      checksum for the entire object
    * Checksum validation notes:
    * -
    *
@@ -370,6 +370,7 @@ export class S3TransferManager implements IS3TransferManager {
       };
       const initialPart = await this.s3ClientInstance.send(new GetObjectCommand(initialPartRequest), transferOptions);
       const initialETag = initialPart.ETag ?? undefined;
+      const partSize = initialPart.ContentLength;
       totalSize = initialPart.ContentRange ? Number.parseInt(initialPart.ContentRange.split("/")[1]) : undefined;
 
       this.dispatchTransferInitiatedEvent(request, totalSize);
@@ -398,7 +399,7 @@ export class S3TransferManager implements IS3TransferManager {
           const getObject = this.s3ClientInstance
             .send(new GetObjectCommand(getObjectRequest), transferOptions)
             .then((response) => {
-              // this.validatePartRange(part, response.ContentRange, this.targetPartSizeBytes);
+              this.validatePartRange(part, response.ContentRange, partSize ?? 0);
               if (response.Body && typeof (response.Body as any).getReader === "function") {
                 const reader = (response.Body as any).getReader();
                 (response.Body as any).getReader = function () {
@@ -606,6 +607,7 @@ export class S3TransferManager implements IS3TransferManager {
     const expectedEnd = Math.min(expectedStart + partSize - 1, total - 1);
 
     // console.log({
+    //   partSize,
     //   partNumber,
     //   start,
     //   end,
