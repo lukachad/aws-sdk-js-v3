@@ -1,6 +1,6 @@
 {
   "name": "@aws-sdk/middleware-sdk-sqs",
-  "version": "3.840.0",
+  "version": "3.845.0",
   "scripts": {
     "build": "concurrently 'yarn:build:cjs' 'yarn:build:es' 'yarn:build:types'",
     "build:cjs": "node ../../scripts/compilation/inline middleware-sdk-sqs",
@@ -24,7 +24,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@aws-sdk/types": "*",
-    "@smithy/smithy-client": "^4.4.5",
+    "@smithy/smithy-client": "^4.4.7",
     "@smithy/types": "^4.3.1",
     "@smithy/util-hex-encoding": "^4.0.0",
     "@smithy/util-utf8": "^4.0.0",

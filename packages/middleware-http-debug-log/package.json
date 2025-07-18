@@ -1,6 +1,6 @@
 {
   "name": "@aws-sdk/middleware-http-debug-log",
-  "version": "3.828.0",
+  "version": "3.844.0",
   "private": true,
   "scripts": {
     "build": "concurrently 'yarn:build:cjs' 'yarn:build:es' 'yarn:build:types'",
@@ -24,7 +24,7 @@
   "dependencies": {
     "@smithy/protocol-http": "^5.1.2",
     "@smithy/types": "^4.3.1",
-    "@smithy/util-stream": "^4.2.2",
+    "@smithy/util-stream": "^4.2.3",
     "@smithy/util-utf8": "^4.0.0",
     "tslib": "^2.6.2"
   },

@@ -28,7 +28,7 @@ export interface BatchRemoveRoleCommandInput extends BatchRemoveRoleInput {}
 export interface BatchRemoveRoleCommandOutput extends BatchRemoveRoleOutput, __MetadataBearer {}
 
 /**
- * <p>Remove role from multiple users or groups in a private re:Post.</p>
+ * <p>Remove a role from multiple users or groups in a private re:Post.</p>
  * @example
  * Use a bare-bones client and the command you need to make an API call.
  * ```javascript
@@ -83,6 +83,28 @@ export interface BatchRemoveRoleCommandOutput extends BatchRemoveRoleOutput, __M
  * @throws {@link RepostspaceServiceException}
  * <p>Base exception class for all service exceptions from Repostspace service.</p>
  *
+ *
+ * @example BatchRemoveRole
+ * ```javascript
+ * //
+ * const input = {
+ *   accessorIds: [
+ *     "12345678-1234-1234-1234-1234567890ab"
+ *   ],
+ *   role: "EXPERT",
+ *   spaceId: "SP1234567890abcdefghijkl"
+ * };
+ * const command = new BatchRemoveRoleCommand(input);
+ * const response = await client.send(command);
+ * /* response is
+ * {
+ *   errors:   [],
+ *   removedAccessorIds: [
+ *     "12345678-1234-1234-1234-1234567890ab"
+ *   ]
+ * }
+ * *\/
+ * ```
  *
  * @public
  */

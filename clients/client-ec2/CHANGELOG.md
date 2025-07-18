@@ -3,6 +3,33 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+# [3.845.0](https://github.com/aws/aws-sdk-js-v3/compare/v3.844.0...v3.845.0) (2025-07-15)
+
+
+### Bug Fixes
+
+* **clients:** upgrade @smithy/middleware-endpoint to fix file/env endpoint resolution ([#7206](https://github.com/aws/aws-sdk-js-v3/issues/7206)) ([37a6275](https://github.com/aws/aws-sdk-js-v3/commit/37a627510bc53ad0ce8d3ef10a2a5ec8ad195ee2))
+
+
+### Features
+
+* **client-ec2:** This release adds support for volume initialization status, which enables you to monitor when the initialization process for an EBS volume is completed. This release also adds IPv6 support to EC2 Instance Connect Endpoints, allowing you to connect to your EC2 Instance via a private IPv6 address. ([ba3d837](https://github.com/aws/aws-sdk-js-v3/commit/ba3d83753c3d4edf3b3e240a9697e9f9c9293644))
+
+
+
+
+
+# [3.844.0](https://github.com/aws/aws-sdk-js-v3/compare/v3.843.0...v3.844.0) (2025-07-09)
+
+
+### Features
+
+* **client-ec2:** Adds support to Capacity Blocks for ML for purchasing EC2 P6e-GB200 UltraServers. Customers can now purchase u-p6e-gb200x72 and u-p6e-gb200x36 UltraServers. Adds new DescribeCapacityBlocks andDescribeCapacityBlockStatus APIs. Adds support for CapacityBlockId to DescribeInstanceTopology. ([202ec5f](https://github.com/aws/aws-sdk-js-v3/commit/202ec5f1f458aac73c8b78558ddfdba9a9595542))
+
+
+
+
+
 # [3.843.0](https://github.com/aws/aws-sdk-js-v3/compare/v3.842.0...v3.843.0) (2025-07-03)
 
 
