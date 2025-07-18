@@ -208,6 +208,36 @@ export class S3TransferManager implements IS3TransferManager {
     throw new Error("Method not implemented.");
   }
 
+  /**
+   * What is missing from the revised SEP and this implementation currently?
+   * PART mode:
+   * - Step 5: validate GetObject response for each part
+   *  - If validation fails at any point, cancel all ongoing requests and error out
+   * - Step 6: after all requests have been sent, validate that the total number of part GET requests sent matches with the
+   *   expected `PartsCount`
+   * - Step 7: when creating DownloadResponse, set accordingly:
+   *  - (DONE) `ContentLength` : total length of the object saved from Step 3
+   *  - (DONE) `ContentRange`: based on `bytes 0-(ContentLength -1)/ContentLength`
+   *  - If ChecksumType is `COMPOSITE`, set all checksum value members to null as
+   *    the checksum value returned from a part GET request is not the composite
+   *    checksum for the entire object
+   * RANGE mode:
+   * - Step 7: validate GetObject response for each part. If validation fails or a
+   *   request fails at any point, cancel all ongoing requests and return an error to
+   *   the user.
+   * - Step 8: after all requests have sent, validate that the total number of ranged
+   *   GET requests sent matches with the expected number saved from Step 5.
+   * - Step 9: create DownloadResponse. Copy the fields in GetObject response from
+   *   Step 3 and set the following fields accordingly:
+   *  - (DONE) `ContentLength` : total length of the object saved from Step 3
+   *  - (DONE) `ContentRange`: based on `bytes 0-(ContentLength -1)/ContentLength`
+   *  - If ChecksumType is `COMPOSITE`, set all checksum value members to null as
+   *    the checksum value returned from a part GET request is not the composite
+   *    checksum for the entire object
+   * Checksum validation notes:
+   * -
+   *
+   */
   public async download(request: DownloadRequest, transferOptions?: TransferOptions): Promise<DownloadResponse> {
     const partNumber = request.PartNumber;
     if (typeof partNumber === "number") {
@@ -353,6 +383,7 @@ export class S3TransferManager implements IS3TransferManager {
         streams.push(Promise.resolve(initialPart.Body));
         requests.push(initialPartRequest);
       }
+      this.updateResponseLengthAndRange(initialPart, totalSize);
       this.assignMetadata(metadata, initialPart);
 
       if (initialPart.PartsCount! > 1) {
@@ -395,6 +426,7 @@ export class S3TransferManager implements IS3TransferManager {
         streams.push(Promise.resolve(getObject.Body));
         requests.push(getObjectRequest);
       }
+      this.updateResponseLengthAndRange(getObject, totalSize);
       this.assignMetadata(metadata, getObject);
     }
 
@@ -445,6 +477,7 @@ export class S3TransferManager implements IS3TransferManager {
 
     streams.push(Promise.resolve(initialRangeGet.Body!));
     requests.push(getObjectRequest);
+    this.updateResponseLengthAndRange(initialRangeGet, totalSize);
     this.assignMetadata(metadata, initialRangeGet);
 
     left = right + 1;
@@ -498,6 +531,13 @@ export class S3TransferManager implements IS3TransferManager {
       for (const listener of listeners) {
         this.removeEventListener(listener.eventType, listener.callback as EventListener);
       }
+    }
+  }
+
+  private updateResponseLengthAndRange(response: DownloadResponse, totalSize: number | undefined): void {
+    if (totalSize !== undefined) {
+      response.ContentLength = totalSize;
+      response.ContentRange = `bytes 0-${totalSize - 1}/${totalSize}`;
     }
   }
 
